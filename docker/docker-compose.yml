@@ -1,0 +1,36 @@
+# =============================================================================
+# 备用 MySQL(docker-compose) —— ⚠️ 本 demo 默认【不使用】此文件
+#
+# 演练场默认连接本机已安装的 MySQL(见 application.yml: localhost:3306)。
+# 仅当你的机器没有 MySQL 时, 才用本文件临时起一个:
+#     cd docker && docker compose up -d
+#     # 账号密码与 application.yml 缺省值一致(root/rootroot), 起完直接 ./scripts/start.sh
+#     # 用完销毁(连同数据): docker compose down -v
+#
+# 为什么留这个文件: 环境可复现是教学项目的基本修养——换一台机器也能 3 分钟起全套。
+# =============================================================================
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: troubleshoot-mysql
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: rootroot          # 与 application.yml 缺省凭据保持一致
+      MYSQL_DATABASE: troubleboot_lab        # 应用启动也会幂等建库, 这里只是提前一步
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max_connections=200
+    volumes:
+      - troubleboot-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-prootroot"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  troubleboot-mysql-data:

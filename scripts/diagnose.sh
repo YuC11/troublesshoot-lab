@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# =============================================================================
+# 一键现场快照 —— 「先留现场, 再动手」的线上纪律
+#
+# 排查前先执行本脚本: 把进程的全部证据(线程栈×2/CPU线程排行/类直方图/
+# GC状态/句柄/网络连接)固化到 diagnostics/<时间戳>/ 目录。
+# 原理: 很多故障是「瞬态」的, 等你慢慢一条条敲命令, 现场已经变了。
+# 相当于给进程拍 CT, 之后再从容分析, 重启也不怕丢证据。
+# =============================================================================
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+# 定位演练场进程: 优先 jps, 找不到再用 ps 兜底
+PID=$(jps -l 2>/dev/null | grep -i troubleshoot | awk '{print $1}' | head -1 || true)
+if [ -z "${PID}" ]; then
+  PID=$(ps aux | grep 'troubleshoot-lab' | grep -v grep | awk '{print $2}' | head -1 || true)
+fi
+if [ -z "${PID}" ]; then
+  echo "未找到 troubleshoot-lab 进程, 请先 ./scripts/start.sh"; exit 1
+fi
+
+OUT="diagnostics/$(date +%Y%m%d-%H%M%S)-pid${PID}"
+mkdir -p "$OUT"
+echo "==> 快照输出: $OUT (pid=$PID)"
+
+# 1. 进程与线程级 CPU: top 两层抓取(进程层 + 线程层, 按CPU排序取前30)
+top -l 1 -o cpu -n 15 -stats pid,command,cpu,mem,threads > "$OUT/top-process.txt" 2>&1 || true
+top -l 1 -o cpu -stats pid,command,cpu,time -n 30 > "$OUT/top-threads-hint.txt" 2>&1 || true
+# macOS 无 top -H, 用 ps 按线程 CPU 排序近似(足够教学定位)
+ps -M "$PID" -o tid,pcpu,time,comm | sort -k2 -rn | head -40 > "$OUT/threads-by-cpu.txt" 2>&1 || true
+
+# 2. 线程栈 ×2 (间隔2s): 连续采样才能看出「钉在同一处」的栈
+jstack "$PID" > "$OUT/jstack-1.txt" 2>&1 || true
+sleep 2
+jstack "$PID" > "$OUT/jstack-2.txt" 2>&1 || true
+
+# 3. GC 状态: 新生代/老年代/Metaspace 占比与 GC 次数(累计值, 前后对比看趋势)
+jstat -gcutil "$PID" > "$OUT/jstat-gcutil.txt" 2>&1 || true
+jstat -gc "$PID" > "$OUT/jstat-gc.txt" 2>&1 || true
+jstat -gcmetaspace "$PID" > "$OUT/jstat-gcmetaspace.txt" 2>&1 || true
+
+# 4. 堆对象直方图: 活体分析谁占大头(byte[]? HashMap? 自定义类?)
+jmap -histo "$PID" 2>/dev/null | head -50 > "$OUT/jmap-histo-top50.txt" || \
+  jcmd "$PID" GC.class_histogram 2>/dev/null | head -50 > "$OUT/jmap-histo-top50.txt" || true
+
+# 5. 句柄与连接: 句柄泄漏(场景11)与连接异常的证据
+lsof -p "$PID" 2>/dev/null | wc -l > "$OUT/lsof-count.txt" || true
+lsof -p "$PID" 2>/dev/null | awk '{print $NF}' | sort | uniq -c | sort -rn | head -30 > "$OUT/lsof-by-file-top30.txt" || true
+netstat -an 2>/dev/null | grep -E 'ESTABLISHED|LISTEN' | head -50 > "$OUT/netstat.txt" || true
+
+# 6. 进程环境快照: 启动参数(教学JVM参数是否生效)与运行时长
+jcmd "$PID" VM.flags > "$OUT/vm-flags.txt" 2>&1 || true
+jcmd "$PID" VM.uptime > "$OUT/vm-uptime.txt" 2>&1 || true
+
+echo "==> 完成. 分析建议:"
+echo "    CPU 高   → threads-by-cpu.txt 找线程号, 在 jstack-*.txt 里搜对应 nid"
+echo "    内存     → jstat-gcutil.txt 看占比, jmap-histo-top50.txt 看对象大头"
+echo "    死锁     → grep -A 10 'deadlock' jstack-1.txt"
+echo "    句柄     → lsof-count.txt 与 lsof-by-file-top30.txt"
