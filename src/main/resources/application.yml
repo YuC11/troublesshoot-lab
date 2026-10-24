@@ -1,0 +1,36 @@
+server:
+  port: 8080
+  tomcat:
+    threads:
+      # 教学配置：故意调小工作线程数，让「慢外部依赖(场景14)/线程池耗尽(场景09)」更快复现全站拖垮
+      max: 50
+
+spring:
+  application:
+    name: troubleshoot-lab
+  datasource:
+    # 凭据支持环境变量覆盖：MYSQL_HOST / MYSQL_PORT / MYSQL_USER / MYSQL_PASSWORD
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/troubleboot_lab?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true&connectTimeout=5000
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:rootroot}
+    hikari:
+      pool-name: TroubleBootHikari
+      # ⚠️ 教学配置：故意把连接池调小到 2 —— 场景 16「连接池耗尽」的根因就在这里。
+      # 线上对照：连接池 size 一定大于「慢 SQL 并发数」，否则慢查询会连锁拖垮所有 DB 接口。
+      maximum-pool-size: 2
+      # 10s 拿不到连接即抛异常（默认 30s），让演练节奏更紧凑
+      connection-timeout: 10000
+
+logging:
+  level:
+    com.lab.troubleshoot: INFO
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # threaddump 用于教学：浏览器直接看线程栈（等价 jstack）
+        include: health,info,metrics,threaddump
+  endpoint:
+    health:
+      show-details: always

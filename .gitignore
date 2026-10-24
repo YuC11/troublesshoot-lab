@@ -1,0 +1,23 @@
+# ---- 构建产物 ----
+target/
+*.class
+
+# ---- 故障演练生成的现场文件（教学产物，不入库）----
+dumps/
+diagnostics/
+logs/
+*.hprof
+*.log
+
+# ---- Arthas 等工具二进制（体积大，README 提供下载脚本）----
+tools/*.jar
+
+# ---- IDE / 系统 ----
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# ---- 临时文件 ----
+*.tmp
+handle-leak-probe.bin
