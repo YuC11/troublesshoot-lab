@@ -27,7 +27,13 @@ echo "==> 快照输出: $OUT (pid=$PID)"
 top -l 1 -o cpu -n 15 -stats pid,command,cpu,mem,threads > "$OUT/top-process.txt" 2>&1 || true
 top -l 1 -o cpu -stats pid,command,cpu,time -n 30 > "$OUT/top-threads-hint.txt" 2>&1 || true
 # macOS 无 top -H, 用 ps 按线程 CPU 排序近似(足够教学定位)
-ps -M "$PID" -o tid,pcpu,time,comm | sort -k2 -rn | head -40 > "$OUT/threads-by-cpu.txt" 2>&1 || true
+# ⚠️ 平台差异: macOS 的 ps -M 要求 -o 紧跟其后; Linux 用 ps -T -p
+ps -M -o tid,pcpu,time,comm -p "$PID" 2>/dev/null | sort -k2 -rn | head -40 > "$OUT/threads-by-cpu.txt" \
+  || ps -T -o spid,pcpu,time,comm -p "$PID" 2>/dev/null | sort -k2 -rn | head -40 > "$OUT/threads-by-cpu.txt" \
+  || true
+# macOS 兜底: jstack 的 cpu= 字段直接按线程 CPU 排序(跨平台, 生产也可用)
+jstack "$PID" 2>/dev/null | sed -E 's/^"([^"]+)".*cpu=([0-9.]+)ms.*/\2 \1/' | sort -rn | head -20 \
+  > "$OUT/threads-by-cpu-jstack.txt" || true
 
 # 2. 线程栈 ×2 (间隔2s): 连续采样才能看出「钉在同一处」的栈
 jstack "$PID" > "$OUT/jstack-1.txt" 2>&1 || true
