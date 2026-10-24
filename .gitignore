@@ -21,3 +21,7 @@ tools/*.jar
 # ---- 临时文件 ----
 *.tmp
 handle-leak-probe.bin
+
+# Arthas 会话产物 / 编辑器目录
+arthas-output/
+.zcode/
