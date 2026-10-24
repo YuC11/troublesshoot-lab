@@ -56,11 +56,11 @@ public class BusyLoopScenario extends AbstractFaultScenario {
     @Override
     public String symptom() {
         return "4 个线程空转烧 CPU。top -Hp 找高 CPU 线程 → 16 进制 → jstack 定位到 burnCpu 代码行。"
-                + "对照 docs/05-业务死循环.md（附 Arthas 热修复死循环全流程）。";
+                + "对照 docs/03-CPU类场景手册.md#场景05（附 Arthas 热修复死循环全流程）。";
     }
 
     @Override
-    public String docFile() { return "05-业务死循环.md"; }
+    public String docFile() { return "03-CPU类场景手册.md#场景05"; }
 
     @Override
     public void doTrigger(Map<String, String> params) {

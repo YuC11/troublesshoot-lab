@@ -48,11 +48,11 @@ public class ThreadPoolExhaustedScenario extends AbstractFaultScenario {
     @Override
     public String symptom() {
         return "30 个 60s 垃圾任务占满 biz-report 线程池（core=4），正常接口 /api/report/summary 排队 10s 超时。"
-                + "jstack 看 biz-report-worker 全部 TIMED_WAITING。对照 docs/09-线程池耗尽.md。";
+                + "jstack 看 biz-report-worker 全部 TIMED_WAITING。对照 docs/04-线程与IO类场景手册.md#场景09。";
     }
 
     @Override
-    public String docFile() { return "09-线程池耗尽.md"; }
+    public String docFile() { return "04-线程与IO类场景手册.md#场景09"; }
 
     @Override
     public void doTrigger(Map<String, String> params) {

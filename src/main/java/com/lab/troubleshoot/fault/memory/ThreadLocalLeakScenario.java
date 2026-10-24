@@ -56,11 +56,11 @@ public class ThreadLocalLeakScenario extends AbstractFaultScenario {
     @Override
     public String symptom() {
         return "线程池常驻线程 set 大对象后不 remove：堆涨且 jcmd GC.run 后不回落（弱引用 key 已清、"
-                + "value 仍被线程持有）。对照 docs/03-ThreadLocal内存泄漏.md。";
+                + "value 仍被线程持有）。对照 docs/02-内存类场景手册.md#场景03。";
     }
 
     @Override
-    public String docFile() { return "03-ThreadLocal内存泄漏.md"; }
+    public String docFile() { return "02-内存类场景手册.md#场景03"; }
 
     @Override
     public void doTrigger(Map<String, String> params) throws InterruptedException {

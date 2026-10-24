@@ -6,9 +6,11 @@
 # 用法:
 #   ./scripts/arthas.sh                 # 交互模式: 会列出 Java 进程让你选择
 #   ./scripts/arthas.sh <pid>           # 直接 attach 指定进程
-#   ./scripts/arthas.sh <pid> -c 'dashboard -n 1'   # 非交互执行单条命令
+#   批处理(非交互执行, 适合脚本/留档):   # ⚠️ 4.x 用 --batch-file 而非 -c
+#     printf 'thread -n 3\nexit\n' > /tmp/batch.as
+#     ./scripts/arthas.sh <pid> --batch-file /tmp/batch.as
 #
-# 常用命令速记(详见 docs/17-工具速查表.md):
+# 常用命令速记(详见 docs/06-工具速查表.md):
 #   dashboard            总览面板 | thread -n 3  CPU 最高3线程 | thread -b  死锁源头
 #   heapdump --live ...  堆转储   | trace 类 方法 '#cost>100'  慢调用追踪
 # =============================================================================

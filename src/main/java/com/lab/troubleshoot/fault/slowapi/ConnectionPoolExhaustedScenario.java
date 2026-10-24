@@ -57,15 +57,17 @@ public class ConnectionPoolExhaustedScenario extends AbstractFaultScenario {
     @Override
     public String symptom() {
         return "6 个 SELECT SLEEP 慢查询占满 Hikari 池(=2)。curl /api/order/1 体验「无辜接口」10s 后报错; "
-                + "jstack 栈在 HikariPool.getConnection。综合考核: 先定位慢SQL再发现池配置。对照 docs/16-连接池耗尽.md。";
+                + "jstack 栈在 HikariPool.getConnection。综合考核: 先定位慢SQL再发现池配置。对照 docs/05-接口慢类场景手册.md#场景16。";
     }
 
     @Override
-    public String docFile() { return "16-连接池耗尽.md"; }
+    public String docFile() { return "05-接口慢类场景手册.md#场景16"; }
 
     @Override
     public void doTrigger(Map<String, String> params) {
         int holderCount = intParam(params, "holders", 6);
+        // 每次占坑 3s: 模拟真实慢 SQL 的持连接时长——间隙太短会让等待者趁虚而入, 复现不出排队超时
+        double holdSeconds = intParam(params, "holdSeconds", 3);
         running = true;
 
         ExecutorService pool = Executors.newFixedThreadPool(holderCount, r -> {
@@ -79,8 +81,8 @@ public class ConnectionPoolExhaustedScenario extends AbstractFaultScenario {
                 try {
                     while (running) {
                         try {
-                            // 每次 SLEEP 0.5s 占住一个连接；循环保持「持续有慢查询持有连接」
-                            labRepository.sleepOnConnection(0.5);
+                            // 每次 SLEEP holdSeconds 占住一个连接；循环保持「持续有慢查询持有连接」
+                            labRepository.sleepOnConnection(holdSeconds);
                         } catch (Exception e) {
                             // 池竞争激烈时 holder 自己也可能拿不到连接，等一下再抢
                             Thread.sleep(500);

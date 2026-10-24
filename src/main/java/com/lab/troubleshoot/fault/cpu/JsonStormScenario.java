@@ -60,11 +60,11 @@ public class JsonStormScenario extends AbstractFaultScenario {
     @Override
     public String symptom() {
         return "3 个线程持续序列化+反序列化 ~4MB 对象图。jstack 栈在 jackson 框架帧 —— "
-                + "训练「框架栈反推业务代码」：栈往下翻找到业务调用行。对照 docs/07-序列化风暴.md。";
+                + "训练「框架栈反推业务代码」：栈往下翻找到业务调用行。对照 docs/03-CPU类场景手册.md#场景07。";
     }
 
     @Override
-    public String docFile() { return "07-序列化风暴.md"; }
+    public String docFile() { return "03-CPU类场景手册.md#场景07"; }
 
     @Override
     public void doTrigger(Map<String, String> params) {

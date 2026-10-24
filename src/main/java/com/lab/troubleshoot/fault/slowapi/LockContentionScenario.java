@@ -55,11 +55,11 @@ public class LockContentionScenario extends AbstractFaultScenario {
     @Override
     public String symptom() {
         return "40 个后台线程竞争 synchronized(锁内 sleep 2s)。jstack 看大量 BLOCKED + 一个 owner。"
-                + "curl /api/inventory/deduct 体验排队。对照 docs/15-锁竞争.md。";
+                + "curl /api/inventory/deduct 体验排队。对照 docs/05-接口慢类场景手册.md#场景15。";
     }
 
     @Override
-    public String docFile() { return "15-锁竞争.md"; }
+    public String docFile() { return "05-接口慢类场景手册.md#场景15"; }
 
     @Override
     public void doTrigger(Map<String, String> params) {

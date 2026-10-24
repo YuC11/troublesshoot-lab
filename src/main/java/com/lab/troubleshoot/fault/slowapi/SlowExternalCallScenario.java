@@ -58,11 +58,11 @@ public class SlowExternalCallScenario extends AbstractFaultScenario {
     @Override
     public String symptom() {
         return "25 个后台线程无超时调用 3s 慢下游，占满 Tomcat 线程。curl /api/payment/no-timeout 体验 hang, "
-                + "/api/payment/with-timeout 对照(快速失败)。对照 docs/14-慢外部依赖.md。";
+                + "/api/payment/with-timeout 对照(快速失败)。对照 docs/05-接口慢类场景手册.md#场景14。";
     }
 
     @Override
-    public String docFile() { return "14-慢外部依赖.md"; }
+    public String docFile() { return "05-接口慢类场景手册.md#场景14"; }
 
     @Override
     public void doTrigger(Map<String, String> params) {

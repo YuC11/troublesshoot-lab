@@ -56,11 +56,11 @@ public class HeapOomScenario extends AbstractFaultScenario {
     @Override
     public String symptom() {
         return "static 集合只进不出，堆老年代持续上涨且 Full GC 后不回落；crash 模式真实抛出 "
-                + "OOM 并自动生成堆 dump（dumps/ 目录）。对照 docs/01-堆内存OOM.md 排查。";
+                + "OOM 并自动生成堆 dump（dumps/ 目录）。对照 docs/02-内存类场景手册.md#场景01 排查。";
     }
 
     @Override
-    public String docFile() { return "01-堆内存OOM.md"; }
+    public String docFile() { return "02-内存类场景手册.md#场景01"; }
 
     @Override
     public void doTrigger(Map<String, String> params) {

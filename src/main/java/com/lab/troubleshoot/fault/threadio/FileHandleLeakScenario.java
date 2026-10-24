@@ -72,11 +72,11 @@ public class FileHandleLeakScenario extends AbstractFaultScenario {
     @Override
     public String symptom() {
         return "每秒泄漏 40 个 FileInputStream 不关闭。lsof -p <pid> | wc -l 观察句柄爬升，"
-                + "打满后捕获真实 Too many open files 异常。对照 docs/11-文件句柄泄漏.md。";
+                + "打满后捕获真实 Too many open files 异常。对照 docs/04-线程与IO类场景手册.md#场景11。";
     }
 
     @Override
-    public String docFile() { return "11-文件句柄泄漏.md"; }
+    public String docFile() { return "04-线程与IO类场景手册.md#场景11"; }
 
     @Override
     public void doTrigger(Map<String, String> params) {

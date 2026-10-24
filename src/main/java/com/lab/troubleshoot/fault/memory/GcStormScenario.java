@@ -58,11 +58,11 @@ public class GcStormScenario extends AbstractFaultScenario {
     public String symptom() {
         return "长生命周期对象占满老年代 + 分配风暴 → 连续 Full GC，GC 线程吃满 CPU。"
                 + "top -Hp 找到的最耗 CPU 线程在 jstack 中查无此 nid（GC 线程非 Java 线程）——"
-                + "「找不到」即关键线索。对照 docs/04-GC风暴.md。";
+                + "「找不到」即关键线索。对照 docs/02-内存类场景手册.md#场景04。";
     }
 
     @Override
-    public String docFile() { return "04-GC风暴.md"; }
+    public String docFile() { return "02-内存类场景手册.md#场景04"; }
 
     @Override
     public void doTrigger(Map<String, String> params) {

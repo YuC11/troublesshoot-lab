@@ -61,16 +61,17 @@ public class MetaspaceOomScenario extends AbstractFaultScenario {
     @Override
     public String symptom() {
         return "循环用新 ClassLoader defineClass 同一字节码，模拟动态代理/脚本引擎的类加载器泄漏；"
-                + "watch 已加载类数与 Metaspace 持续上涨。对照 docs/02-MetaspaceOOM.md。";
+                + "watch 已加载类数与 Metaspace 持续上涨。对照 docs/02-内存类场景手册.md#场景02。";
     }
 
     @Override
-    public String docFile() { return "02-MetaspaceOOM.md"; }
+    public String docFile() { return "02-内存类场景手册.md#场景02"; }
 
     @Override
     public void doTrigger(Map<String, String> params) {
         String mode = strParam(params, "mode", "gentle");
-        int targetLoaders = intParam(params, "targetLoaders", 6000);
+        // 实测每加载器约占 12~13KB 元数据: 64m 上限下 3000 个(≈38MB)温和安全, crash 模式无上限
+        int targetLoaders = intParam(params, "targetLoaders", 3000);
         oomOccurred = false;
 
         worker = new Thread(() -> {

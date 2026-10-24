@@ -54,11 +54,11 @@ public class SlowSqlNoIndexScenario extends AbstractFaultScenario {
     @Override
     public String symptom() {
         return "orders 表(user_id 无索引)全表扫描 100 万行，查询秒级。EXPLAIN 看 type=ALL，"
-                + "POST /api/order/fix-index 建索引后毫秒级(type=ref) —— 完整修复闭环。对照 docs/12-慢SQL缺索引.md。";
+                + "POST /api/order/fix-index 建索引后毫秒级(type=ref) —— 完整修复闭环。对照 docs/05-接口慢类场景手册.md#场景12。";
     }
 
     @Override
-    public String docFile() { return "12-慢SQL缺索引.md"; }
+    public String docFile() { return "05-接口慢类场景手册.md#场景12"; }
 
     @Override
     public void doTrigger(Map<String, String> params) {

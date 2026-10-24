@@ -56,11 +56,11 @@ public class DeadlockScenario extends AbstractFaultScenario {
     @Override
     public String symptom() {
         return "两线程互持对方需要的锁，接口挂死不报错。jstack 直接输出 Found one Java-level deadlock。"
-                + "对照 docs/08-死锁.md（含 Arthas thread -b 找阻塞源头）。";
+                + "对照 docs/04-线程与IO类场景手册.md#场景08（含 Arthas thread -b 找阻塞源头）。";
     }
 
     @Override
-    public String docFile() { return "08-死锁.md"; }
+    public String docFile() { return "04-线程与IO类场景手册.md#场景08"; }
 
     @Override
     public void doTrigger(Map<String, String> params) {

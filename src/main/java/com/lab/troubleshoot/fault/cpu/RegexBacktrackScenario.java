@@ -58,11 +58,11 @@ public class RegexBacktrackScenario extends AbstractFaultScenario {
     @Override
     public String symptom() {
         return "2 个线程持续用灾难正则 (a+)+$ 匹配长输入，单次匹配即耗时数秒（指数回溯）。"
-                + "jstack 栈深陷 java.util.regex —— 学会从框架栈反推业务行。对照 docs/06-正则回溯.md。";
+                + "jstack 栈深陷 java.util.regex —— 学会从框架栈反推业务行。对照 docs/03-CPU类场景手册.md#场景06。";
     }
 
     @Override
-    public String docFile() { return "06-正则回溯.md"; }
+    public String docFile() { return "03-CPU类场景手册.md#场景06"; }
 
     @Override
     public void doTrigger(Map<String, String> params) {

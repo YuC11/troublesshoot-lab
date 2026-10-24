@@ -50,11 +50,11 @@ public class ThreadLeakScenario extends AbstractFaultScenario {
     @Override
     public String symptom() {
         return "每 50ms 泄漏一个长睡线程（10 分钟寿命），线程总数持续上涨。"
-                + "jstack | grep -c '^\"' 实时计数。对照 docs/10-线程泄漏.md。";
+                + "jstack | grep -c '^\"' 实时计数。对照 docs/04-线程与IO类场景手册.md#场景10。";
     }
 
     @Override
-    public String docFile() { return "10-线程泄漏.md"; }
+    public String docFile() { return "04-线程与IO类场景手册.md#场景10"; }
 
     @Override
     public void doTrigger(Map<String, String> params) {
