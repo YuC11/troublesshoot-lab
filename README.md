@@ -3,6 +3,8 @@
 一个**本地可跑、零外部依赖**（连你本机的 MySQL）的 Java/Spring Boot 故障演练项目：
 **16 个生产典型故障场景**，每个都可 HTTP 触发/停止/反复演练，配套
 「可观测性视角 → 原生工具定位 → 根因 → 修复对比 → Arthas 进阶」的完整 Runbook。
+数据层按**企业级订单域**建模（orders 100 万行 × 29 字段宽表 + order_item 300 万行等 5 张表，
+索引设计解读见 [docs/05 附录](docs/05-接口慢类场景手册.md)）。
 目的不是展示故障，而是训练**线上排查思维与实践能力**。
 
 - JDK 21 · Spring Boot 3.4.5 · MySQL 8（本地） · Arthas 4.0.4（本地 `/Users/yc/environment/arthas-4.0.4`）
@@ -14,7 +16,7 @@
 # 0) 环境自检（需 JDK21+ / Maven / 本机 MySQL 8）
 java -version && mvn -version && mysql -h127.0.0.1 -uroot -prootroot -e "SELECT VERSION();"
 
-# 1) 启动（自动打包 + 教学JVM参数 + 首次自动建库灌 100 万行, 约 10~30s）
+# 1) 启动（自动打包 + 教学JVM参数 + 首次自动建库灌数: orders 100万×29列 + order_item 300万, 约 2~4 分钟）
 ./scripts/start.sh
 
 # 2) 打开控制台触发故障, 另开终端按手册排查
@@ -40,7 +42,7 @@ open http://localhost:8080
 | 09 | `thread-pool-exhausted` | 线程池耗尽 | 垃圾任务拖死共享池 | 同上 |
 | 10 | `thread-leak` | 线程泄漏 | new Thread 不复用 | 同上 |
 | 11 | `io-handle-leak` | 句柄泄漏 | 流不 close | 同上 |
-| 12 | `slow-sql-no-index` | 慢 SQL 缺索引 ⭐闭环 | 100万行全表扫描→建索引修复 | [05 手册](docs/05-接口慢类场景手册.md) |
+| 12 | `slow-sql-index-failure` | 慢 SQL·索引列序错误 ⭐闭环 | 有索引用不上（最左前缀） | [05 手册](docs/05-接口慢类场景手册.md) |
 | 13 | `slow-n-plus-1` | N+1 查询 | 慢查询日志抓不到的慢 | 同上 |
 | 14 | `slow-external-no-timeout` | 慢外部依赖 | HTTP 无超时级联拖垮 | 同上 |
 | 15 | `slow-lock-contention` | 锁竞争 | 锁内做慢 IO | 同上 |

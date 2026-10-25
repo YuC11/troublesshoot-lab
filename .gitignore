@@ -3,9 +3,9 @@ target/
 *.class
 
 # ---- 故障演练生成的现场文件（教学产物，不入库）----
-dumps/
-diagnostics/
-logs/
+dumps
+diagnostics
+logs
 *.hprof
 *.log
 

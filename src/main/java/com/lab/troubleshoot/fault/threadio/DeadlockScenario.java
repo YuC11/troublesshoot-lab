@@ -66,11 +66,11 @@ public class DeadlockScenario extends AbstractFaultScenario {
     public void doTrigger(Map<String, String> params) {
         running = true;
 
-        // 线程 1：先拿 A，再要 B（模拟「A 账户向 B 转账」）
-        Thread t1 = new Thread(() -> holdAndTryLock("transfer-A2B", accountLockA, t1HoldingA, accountLockB),
+        // 线程 1：先拿 A，再要 B（模拟「A 账户向 B 转账」）；staggerMs 错峰确保双方都先持有第一把锁
+        Thread t1 = new Thread(() -> holdAndTryLock("transfer-A2B", accountLockA, t1HoldingA, accountLockB, 150),
                 "transfer-A2B");
         // 线程 2：先拿 B，再要 A（模拟「B 账户向 A 转账」）—— 锁顺序相反即死锁配方
-        Thread t2 = new Thread(() -> holdAndTryLock("transfer-B2A", accountLockB, t2HoldingB, accountLockA),
+        Thread t2 = new Thread(() -> holdAndTryLock("transfer-B2A", accountLockB, t2HoldingB, accountLockA, 300),
                 "transfer-B2A");
         t1.setDaemon(true);
         t2.setDaemon(true);
@@ -84,12 +84,21 @@ public class DeadlockScenario extends AbstractFaultScenario {
     /**
      * 持有 first 锁后持续 tryLock second——running 期间表现为真死锁；
      * 开关翻转后退出循环并按获取的反序释放（Lock 规范的 unlock 顺序）。
+     *
+     * @param staggerMs 拿到第一把锁后的错峰休眠：保证两个线程都先持稳自己的锁再去抢对方的——
+     *                  消除「启动瞬间先抢到两把锁」的竞态，让死锁现场确定可复现
      */
     private void holdAndTryLock(String bizName, ReentrantLock first, AtomicBoolean firstHeld,
-                                ReentrantLock second) {
+                                ReentrantLock second, long staggerMs) {
         first.lock();
         firstHeld.set(true);
         try {
+            try {
+                Thread.sleep(staggerMs);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return; // finally 兜底释放
+            }
             while (running) {
                 try {
                     // tryLock 超时循环：jstack 抓取瞬间线程 PARK 在这里，同时持有 first 锁

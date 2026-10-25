@@ -48,8 +48,9 @@ public class NPlusOneScenario extends AbstractFaultScenario {
 
     @Override
     public String symptom() {
-        return "500 用户 × 逐条查订单 = 501 条 SQL，单条 <1ms 但接口秒级；慢查询日志抓不到。"
-                + "触发后用 /api/order/top-spenders?mode=n+1 体验, mode=batch 是修复版。对照 docs/05-接口慢类场景手册.md#场景13。";
+        return "order_item(300万行)上 500 用户 × 逐条查商品明细 = 501 条 SQL，单条 <2ms(有索引)但接口秒级；"
+                + "慢查询日志抓不到。触发后用 /api/order/top-spenders?mode=n+1 体验, mode=batch 是修复版。"
+                + "对照 docs/05-接口慢类场景手册.md#场景13。";
     }
 
     @Override
