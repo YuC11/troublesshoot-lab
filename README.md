@@ -1,34 +1,32 @@
 # troubleshoot-lab · 线上故障排查演练场
 
-一个**本地可跑、零外部依赖**（连你本机的 MySQL）的 Java/Spring Boot 故障演练项目：
-**16 个生产典型故障场景**，每个都可 HTTP 触发/停止/反复演练，配套
-「可观测性视角 → 原生工具定位 → 根因 → 修复对比 → 停止恢复验证 → Arthas 进阶」的完整 Runbook。
-数据层按**企业级订单域**建模（orders 100 万行 × 29 字段宽表 + order_item 300 万行等 5 张表，
-索引设计解读见 [docs/05 附录](docs/05-接口慢类场景手册.md)）。
+本地可跑、零外部依赖的 Java/Spring Boot 故障演练项目：**16 个生产典型故障场景**，
+全部可 HTTP 触发/停止/反复演练，每个场景配套完整 Runbook
+（可观测性视角 → 原生工具定位 → 根因 → 修复对比 → 停止恢复验证 → Arthas 进阶）。
+数据层按**企业级订单域**建模（orders 100 万行 × 29 字段宽表 + order_item 300 万行等 5 张表）。
 目的不是展示故障，而是训练**线上排查思维与实践能力**。
 
-- JDK 21 · Spring Boot 3.4.5 · MySQL 8（本地） · Arthas 4.0.4（本地 `/Users/yc/environment/arthas-4.0.4`）
-- 设计模式：Strategy + Template Method + Registry + Builder + Facade（详见 [docs/01 附录](docs/01-排查方法论与工具优先级.md)）
+- JDK 21 · Spring Boot 3.4.5 · MySQL 8（本地） · Arthas 4.0.4（本地安装，不下载）
+- 核心契约：**停止即确定性回落**——16 个场景 stop 内置恢复动作，无需等待 GC 或重启（契约见 docs/01 §4.3）
+- 设计模式：Strategy / Template Method / Registry / Builder / Facade（见 docs/01 附录）
 
-## 快速开始（3 步）
+## 快速开始
 
 ```bash
-# 0) 环境自检（需 JDK21+ / Maven / 本机 MySQL 8）
+# 0) 环境自检（JDK 21+ / Maven / 本机 MySQL 8）
 java -version && mvn -version && mysql -h127.0.0.1 -uroot -prootroot -e "SELECT VERSION();"
 
-# 1) 启动（统一入口 lab.sh: 自动打包+教学JVM参数+后台运行+健康检查;
-#    首次自动建库灌数: orders 100万×29列 + order_item 300万, 约 2~4 分钟）
+# 1) 启动（自动打包 + 教学 JVM 参数 + 健康检查；首次自动建库灌数约 2~4 分钟）
 ./scripts/lab.sh
 
-# 2) 打开控制台触发故障, 另开终端按手册排查
+# 2) 控制台触发故障，另开终端按手册排查
 open http://localhost:8080
 ```
 
-数据库缺省凭据 `root/rootroot`，可用环境变量覆盖：
-`MYSQL_HOST / MYSQL_PORT / MYSQL_USER / MYSQL_PASSWORD`。
-本机没有 MySQL？`cd docker && docker compose up -d` 起一个备用的（demo 本身不依赖 docker）。
+> ⚠️ **凭据** `root/rootroot` 仅限本机教学，可用 `MYSQL_HOST / MYSQL_PORT / MYSQL_USER / MYSQL_PASSWORD` 覆盖；
+> 本机无 MySQL 时 `cd docker && docker compose up -d` 起备用实例（demo 默认不用 Docker）。
 
-## 16 个场景总表
+## 场景总表
 
 | # | 场景 ID | 名称 | 一句话病灶 | 手册 |
 |---|---|---|---|---|
@@ -49,58 +47,57 @@ open http://localhost:8080
 | 15 | `slow-lock-contention` | 锁竞争 | 锁内做慢 IO | 同上 |
 | 16 | `slow-db-pool-exhausted` | 连接池耗尽 ⭐综合 | 慢SQL+池小的连锁反应 | 同上 |
 
-> 文档地图与两种读法（**闯关**：01 二/三节 → 控制台只看告警自己排查 → 卡住才看路线图；
-> **速查**：直接 06 拿命令）见 [01 总纲](docs/01-排查方法论与工具优先级.md) 开篇——
-> 它是全部 16 个场景的总纲：可观测性前置认知、P0~P4 工具优先级、macOS/Linux 命令差异，
-> 以及四个跨场景通用机制的正主（**GC 惰性 / OOM catch 纪律 / 停止即回落契约 / jstat 口径陷阱**），
-> 各场景手册正文只留「01 §x」指针。
+> ⚠️ **演练纪律：一次只触发一个场景**——多故障叠加是定位的地狱模式；
+> 动手排查前先 `./scripts/diagnose.sh` 留现场，瞬态故障不等慢条斯理的人。
 
-## 带新人/自我训练的建议玩法
+## 文档
 
-1. **闯关模式**：控制台只看「告警现象」卡片，不看手册，独立排查 30 分钟；
-2. 排查时先问三个问题：**ping 快不快？GC 正常吗？线程都在等什么？**
-3. 卡住再看手册的「定位路线图」，最后才展开「分步命令」对照；
-4. 每个场景务必体验 **stop 恢复对比**（修复验证是排查闭环的一半；
-   16 个场景停止即确定性回落，契约见 [01 总纲 §4.3](docs/01-排查方法论与工具优先级.md)）；
-5. 场景 05/08/12 再用 **Arthas 复盘一遍**（`thread -n 3` / `thread -b` / `trace`），
-   体会「一条命令等价手工三步」；
-6. 纪律：**一次只触发一个场景**；动手前 `./scripts/diagnose.sh` 留现场。
+| 文档 | 内容 |
+|---|---|
+| [01 总纲](docs/01-排查方法论与工具优先级.md) | 文档地图与读法 · 问题全景 · 可观测性前置 · P0~P4 工具优先级 · macOS/Linux 差异 · **跨场景通用机制正主**（GC 惰性 / OOM catch 纪律 / 停止即回落契约 / jstat 口径陷阱） |
+| [02 内存类](docs/02-内存类场景手册.md) | 场景 01~04 |
+| [03 CPU 类](docs/03-CPU类场景手册.md) | 场景 05~07 |
+| [04 线程与 IO 类](docs/04-线程与IO类场景手册.md) | 场景 08~11 |
+| [05 接口慢类](docs/05-接口慢类场景手册.md) | 场景 12~16（含订单域 schema 与索引设计附录） |
+| [06 工具速查表](docs/06-工具速查表.md) | jcmd / Arthas / MySQL 纯命令查阅 |
 
-## 项目结构
-
-```
-scripts/  lab.sh(统一管理: 启动/-stop/-restart/-clean/-clean-all/-wait) diagnose.sh(一键现场快照) arthas.sh(本地4.0.4, 自动attach演练场)
-docs/     01方法论 02内存 03CPU 04线程IO 05接口慢 06速查表（6 份整合手册）
-src/      core/设计模式骨架  web/门面与业务接口  fault/{memory,cpu,threadio,slowapi}/16场景
-docker/   docker-compose.yml（备用 MySQL，demo 默认不用）
-dumps/ diagnostics/ logs/   演练产物（已 gitignore）
-```
-
-## 常用命令备忘
+## 常用命令
 
 ```bash
-./scripts/lab.sh                                    # 统一管理入口: 启动(后台+健康检查)
+./scripts/lab.sh                                    # 启动(后台+健康检查)
 ./scripts/lab.sh -status                            # 状态一览(PID/端口/JVM/数据行数)
-./scripts/lab.sh -stop                              # 优雅停止(未运行时友好提示, PID身份校验防误杀)
-./scripts/lab.sh -restart                           # 重启(未运行则直接启动; 灌数中重启也安全)
-./scripts/lab.sh -clean                             # 清除MySQL演练库(需先停止, 交互确认, -y 跳过)
+./scripts/lab.sh -stop                              # 优雅停止(PID身份校验防误杀)
+./scripts/lab.sh -restart                           # 重启(灌数中重启也安全)
+./scripts/lab.sh -clean                             # 清 MySQL 演练库(需先停止, -y 跳过确认)
 ./scripts/lab.sh -clean-all                         # 清库+演练产物(dumps/diagnostics/旧日志)
-./scripts/lab.sh -stop -clean                       # 组合: 停止并清库
-./scripts/lab.sh -restart -clean-all                # 工厂重置: 停止+清库清产物+重启
-./scripts/lab.sh -restart -wait                     # 重启并阻塞等待数据灌数完成(脚本化/CI)
+./scripts/lab.sh -restart -clean-all                # 工厂重置
+./scripts/lab.sh -restart -wait                     # 重启并阻塞等灌数完成(脚本化/CI)
 JAVA_OPTS_EXTRA='-Xmx512m' ./scripts/lab.sh         # 临时加大堆复现不同故障强度
 ./scripts/diagnose.sh                               # 一键快照现场到 diagnostics/
-./scripts/arthas.sh                                 # Arthas attach（自动选中演练场进程）
+./scripts/arthas.sh                                 # Arthas attach(自动选中演练场进程)
 curl localhost:8080/api/faults                      # 场景列表
-curl -X POST localhost:8080/api/faults/oom-heap/trigger?mode=crash   # 例: 真OOM+dump
+curl -X POST 'localhost:8080/api/faults/oom-heap/trigger?mode=crash'   # 例: 真OOM+dump
 curl -X POST localhost:8080/api/faults/<id>/stop    # 停止任意场景
 ```
 
 > PID 记录在 `logs/app.pid`，日志在 `logs/app.log`。
 
-## 已知说明
+## 目录结构
 
-- macOS 本机演练与 Linux 生产的命令差异已在手册中以 🍎 标注（`top -Hp`、nid 进制、
-  `timeout`、`ss` 等），生产操作以 Linux 版为准；
-- 演练场进程为教学参数（256m 小堆/池=2/Tomcat=50），**不要照抄到生产**；
-  每处教学配置在代码/配置文件中都有注释说明真实含义。
+```
+scripts/  lab.sh(统一管理入口) diagnose.sh(现场快照) arthas.sh(Arthas 4.0.4)
+docs/     01总纲 02内存 03CPU 04线程IO 05接口慢 06速查表
+src/      core/设计模式骨架  web/门面与业务接口  fault/{memory,cpu,threadio,slowapi}/16场景
+docker/   docker-compose.yml(备用 MySQL, 默认不用)
+dumps/ diagnostics/ logs/   演练产物(已 gitignore)
+```
+
+## ⚠️ 注意事项
+
+- **教学参数勿照抄生产**：256m 小堆 / Hikari 池=2 / Tomcat=50 均为刻意配置以加速复现，
+  每处教学配置在代码与配置文件中都有注释说明真实含义；
+- **运行中拒绝清库**：`-clean` / `-clean-all` 在应用运行时会被拒绝——运行中删库等于制造真事故；
+- **crash 模式会真实 OOM**：`?mode=crash` 触发真 `OutOfMemoryError` 并自动落 dump；
+  场景自动自愈转 ERROR（控制台原因可读），点停止即复位——但线上 OOM 的标准动作是重启；
+- **Arthas 退出纪律**：会话内 `exit` 只断开客户端，彻底卸载 agent 执行 `stop`；
+- macOS 演练与 Linux 生产的命令差异已在手册中以 🍎 标注，生产操作以 Linux 版为准。
