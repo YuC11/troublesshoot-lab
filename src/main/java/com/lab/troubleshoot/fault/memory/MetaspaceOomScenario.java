@@ -70,10 +70,10 @@ public class MetaspaceOomScenario extends AbstractFaultScenario {
     @Override
     public void doTrigger(Map<String, String> params) {
         String mode = strParam(params, "mode", "gentle");
-        // 实测每加载器约 5~6KB 元数据(标记类极小, 加载器自身开销为主);
-        // 应用基线约 45MB(见 GC.heap_info), 2000 个 ≈ +11MB → 约 56MB, 距 64m 上限留足余量;
-        // crash 模式无上限, 会真实 OOM
-        int targetLoaders = intParam(params, "targetLoaders", 2000);
+        // 实测每加载器约 0.9KB 元数据(标记类为极小空壳类; stop 日志 KB 对比: 1972 个类 ≈ 1.8MB)。
+        // 4000 个 ≈ +3.6MB → 基线约 42.5MB 涨到 ~46MB: 涨幅在一位小数仪表盘上肉眼可见,
+        // 且距 64m 上限余量充足; crash 模式无上限, 会真实 OOM
+        int targetLoaders = intParam(params, "targetLoaders", 4000);
         oomOccurred = false;
 
         worker = new Thread(() -> {
@@ -142,8 +142,9 @@ public class MetaspaceOomScenario extends AbstractFaultScenario {
         );
     }
 
-    private int metaspaceUsedMb() {
-        return (int) (metaspaceUsedKb() >> 10);
+    /** MB 一位小数：温和模式涨幅仅 ~3.6MB, 整数 MB 会把变化吞进取整（仪表盘/状态同口径） */
+    private double metaspaceUsedMb() {
+        return Math.round(metaspaceUsedKb() / 1024.0 * 10) / 10.0;
     }
 
     /** KB 精度：温和模式涨幅仅 ~2MB, MB 取整看不出差异, 前后对比日志用 KB 才有意义 */

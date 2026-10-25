@@ -34,11 +34,12 @@ public class MetricsController {
         m.put("heapMaxMb", toMb(heap.getMax()));
 
         // Metaspace（场景 02 的关键指标，等价 jstat -gcmetacapacity；注意 -gcutil 的 M 列是 used/committed 口径）
+        // 一位小数: 温和模式涨幅 ~3.6MB, 整数 MB 截断会让仪表盘看起来"触发了没反应"
         ManagementFactory.getMemoryPoolMXBeans().stream()
                 .filter(p -> p.getName().toLowerCase().contains("metaspace"))
                 .findFirst()
                 .ifPresent(p -> {
-                    m.put("metaspaceUsedMb", toMb(p.getUsage().getUsed()));
+                    m.put("metaspaceUsedMb", toMb1(p.getUsage().getUsed()));
                     m.put("metaspaceMaxMb", toMb(p.getUsage().getMax()));
                 });
 
@@ -62,6 +63,11 @@ public class MetricsController {
 
     private static long toMb(long bytes) {
         return bytes / 1024 / 1024;
+    }
+
+    /** MB 一位小数（Metaspace 等小幅变化场景专用） */
+    private static double toMb1(long bytes) {
+        return Math.round(bytes / 1048576.0 * 10) / 10.0;
     }
 
     private static double round(double v) {
