@@ -90,12 +90,20 @@ public class HeapOomScenario extends AbstractFaultScenario {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             } catch (OutOfMemoryError oom) {
-                // OOM 在业务线程里被捕获：进程不死，dump 已由 -XX:+HeapDumpOnOutOfMemoryError 生成
+                // OOM 后的第一原则与场景 02 相同: 先做零分配的救命动作(置标志/清引用/GC), 再记账。
+                // (场景 02 曾因 catch 里先拼字符串导致二次 OOM、clear 执行不到, 整个演练台冻死)
                 oomOccurred = true;
-                markDamaged("OOM 已发生: " + oom.getMessage()
-                        + " —— dumps/ 目录已生成 heap dump, 进程未退出(教学环境), 线上必须立即重启");
-                log.error("[oom-heap] OutOfMemoryError! {}, HeapDumpOnOutOfMemoryError 已落 dump 文件", oom.getMessage());
-                unboundedCache.clear(); // 教学环境自愈，保证后续场景还能演练
+                int leakedChunks = unboundedCache.size();
+                unboundedCache.clear();
+                System.gc(); // dump 已由 -XX:+HeapDumpOnOutOfMemoryError 生成; 这里释放引用让堆立刻可用
+                try {
+                    markDamaged("OOM 已发生: " + oom.getMessage()
+                            + " —— dumps/ 目录已生成 heap dump, 已自动清空自愈(教学环境), 线上必须立即重启");
+                    log.error("[oom-heap] OutOfMemoryError! {}, HeapDumpOnOutOfMemoryError 已落 dump 文件; "
+                            + "已自动清空 {} 个块并触发 GC 自愈", oom.getMessage(), leakedChunks);
+                } catch (Throwable bookkeeping) {
+                    // 自愈(清引用+GC)已完成, 记账失败不再向上传播
+                }
             }
         }, "oom-heap-worker");
         worker.start();

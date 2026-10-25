@@ -228,9 +228,10 @@ do_start() {
   fi
 
   # 教学 JVM 参数(每个参数都是 docs 里的教学点):
-  #   小堆 256m 快速复现内存故障 / 512k 栈 / Metaspace 上限 64m(场景02) /
+  #   小堆 256m 快速复现内存故障 / 512k 栈 / Metaspace 上限 96m(场景02:
+  #   撞墙口径是 committed≈6KB/加载器≈6.7×used, 温和4000个需~25MB committed 余量, 64m 放不下) /
   #   OOM 自动落 dump 到 dumps/ ; JAVA_OPTS_EXTRA 可追加覆盖(如 -Xmx512m)
-  local java_opts="-Xms256m -Xmx256m -Xss512k -XX:MaxMetaspaceSize=64m \
+  local java_opts="-Xms256m -Xmx256m -Xss512k -XX:MaxMetaspaceSize=96m \
  -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=./dumps -Dfile.encoding=UTF-8 \
  ${JAVA_OPTS_EXTRA:-}"
 
