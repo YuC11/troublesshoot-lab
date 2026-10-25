@@ -115,21 +115,30 @@
 </head>
 <body>
 <header><div class="hd">
-  <div class="brand"><b>TROUBLESHOOT<i>·</i>LAB</b><span>线上故障演练场 / 16 scenarios</span></div>
+  <div class="brand"><b>TROUBLESHOOT<i>·</i>LAB</b><span>线上故障演练场 / 17 scenarios</span></div>
   <div class="hd-right">
     <span class="chip">PID <b id="m-pid">--</b></span>
     <span class="chip"><span class="live-dot"></span>UPTIME <b id="m-up">--</b></span>
+    <button id="btn-quiz" style="cursor:pointer;border:1px solid var(--line);background:var(--panel);border-radius:5px;padding:4px 10px;color:var(--txt);font-weight:600">🎯 盲测</button>
   </div>
 </div></header>
+
+<!-- 盲测模式: 隐藏场景网格, 只给告警 -->
+<div id="quiz-banner" style="display:none;max-width:1280px;margin:12px auto 0;padding:14px 20px;background:var(--panel);border:2px dashed var(--warn,#b7791f);border-radius:8px">
+  <div style="font-weight:700;margin-bottom:6px">🎯 盲测进行中 —— 只看告警, 独立判断是哪个故障</div>
+  <div id="quiz-alert" style="font-family:ui-monospace,monospace;font-size:13px;margin-bottom:10px"></div>
+  <button id="btn-reveal" style="cursor:pointer;border:1px solid var(--line);background:var(--panel2);border-radius:5px;padding:4px 12px;font-weight:600">揭示答案</button>
+  <span style="margin-left:8px;color:var(--dim);font-size:12px">分类提示已给; 判断出 id 后可先 curl 触发命令自证再揭示</span>
+</div>
 
 <div class="wrap">
   <!-- JVM 仪表 -->
   <div class="metrics">
-    <div class="meter"><div class="k">HEAP 堆内存</div><div class="v"><span id="m-heap">--</span><small> / <span id="m-heapmax">--</span> MB</small></div><div class="bar"><i id="b-heap"></i></div><div class="sub" id="s-heap">jstat -gcutil</div></div>
-    <div class="meter"><div class="k">METASPACE 元空间</div><div class="v"><span id="m-meta">--</span><small> / 96 MB</small></div><div class="bar"><i id="b-meta"></i></div><div class="sub">类 <span id="m-metacls">--</span> · jcmd GC.heap_info</div></div>
+    <div class="meter"><div class="k">HEAP 堆内存</div><div class="v"><span id="m-heap">--</span><small> / <span id="m-heapmax">--</span> MB</small></div><div class="bar"><i id="b-heap"></i></div><div class="sub"><canvas id="spark-heap" width="90" height="16" style="vertical-align:-3px"></canvas> <span id="s-heap">jstat -gcutil</span></div></div>
+    <div class="meter"><div class="k">METASPACE 元空间</div><div class="v"><span id="m-meta">--</span><small> / 96 MB</small></div><div class="bar"><i id="b-meta"></i></div><div class="sub">类 <span id="m-metacls">--</span> · 已提交 <span id="m-metacmt">--</span> MB</div></div>
     <div class="meter"><div class="k">THREADS 线程</div><div class="v" id="m-thr">--</div><div class="bar"><i id="b-thr" style="width:0"></i></div><div class="sub">peak <span id="m-thrpeak">--</span></div></div>
     <div class="meter"><div class="k">CLASSES 已加载类</div><div class="v" id="m-cls">--</div><div class="sub">Metaspace 场景观察它</div></div>
-    <div class="meter"><div class="k">CPU 进程占用</div><div class="v"><span id="m-cpu">--</span><small> %</small></div><div class="bar"><i id="b-cpu"></i></div><div class="sub">system <span id="m-syscpu">--</span>%</div></div>
+    <div class="meter"><div class="k">CPU 进程占用</div><div class="v"><span id="m-cpu">--</span><small> %</small></div><div class="bar"><i id="b-cpu"></i></div><div class="sub"><canvas id="spark-cpu" width="90" height="16" style="vertical-align:-3px"></canvas> system <span id="m-syscpu">--</span>%</div></div>
   </div>
 
   <div class="hint">
@@ -180,7 +189,8 @@ async function pollMetrics(){
     const hp=m.heapUsedMb/m.heapMaxMb*100; paintMeter('b-heap',hp,hp);
     $('s-heap').textContent='jstat -gcutil · '+hp.toFixed(0)+'%';
     if(m.metaspaceUsedMb!=null){ $('m-meta').textContent=m.metaspaceUsedMb;
-      const mp=m.metaspaceUsedMb/(m.metaspaceMaxMb>0?m.metaspaceMaxMb:96)*100; paintMeter('b-meta',mp,mp); }
+      const mp=m.metaspaceUsedMb/(m.metaspaceMaxMb>0?m.metaspaceMaxMb:96)*100; paintMeter('b-meta',mp,mp);
+      $('m-metacmt').textContent=m.metaspaceCommittedMb??'--'; }
     $('m-metacls').textContent=(m.loadedClassCount??'--').toLocaleString();
     $('m-thr').textContent=m.threadCount; $('m-thrpeak').textContent=m.peakThreadCount;
     paintMeter('b-thr',Math.min(m.threadCount/300*100,100),0);
@@ -188,7 +198,42 @@ async function pollMetrics(){
     const cpu=Math.round((m.processCpuLoad<0?0:m.processCpuLoad)*100);
     $('m-cpu').textContent=cpu; $('m-syscpu').textContent=Math.round((m.systemCpuLoad<0?0:m.systemCpuLoad)*100);
     paintMeter('b-cpu',cpu,0);
+    drawSpark('spark-heap', hp); drawSpark('spark-cpu', cpu);
   }catch(e){ /* 进程未起或重启中 */ }
+}
+
+/* ── 走势 sparkline: 训练「看趋势」而不是「看瞬间」(60 个采样 ≈ 2 分钟) ── */
+const sparkData={};
+function drawSpark(id, val){
+  if(val==null||isNaN(val)) return;
+  const arr=sparkData[id]||(sparkData[id]=[]); arr.push(val); if(arr.length>60) arr.shift();
+  const cv=$(id); if(!cv) return; const ctx=cv.getContext('2d');
+  const w=cv.width, h=cv.height; ctx.clearRect(0,0,w,h);
+  ctx.strokeStyle='#4a7c59'; ctx.lineWidth=1; ctx.beginPath();
+  arr.forEach((v,i)=>{ const x=i/(59)*w, y=h-2-(Math.min(v,100)/100)*(h-4);
+    i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
+  ctx.stroke();
+}
+
+/* ── 盲测模式 ── */
+function setQuizUI(active, alertText){
+  $('quiz-banner').style.display=active?'block':'none';
+  document.querySelectorAll('.wrap > *').forEach(el=>el.style.display=active?'none':'');
+  if(alertText!=null) $('quiz-alert').textContent=alertText;
+}
+async function startQuiz(){
+  try{
+    const r=await api('POST','/api/faults/quiz');
+    setQuizUI(true, r.alertText+'  [分类: '+r.category+']');
+    toast('盲测已出题 —— 场景已真实触发, 按告警排查','ok');
+  }catch(e){ toast(e.message,'err'); }
+}
+async function revealQuiz(){
+  try{
+    const s=await api('GET','/api/faults/quiz/reveal');
+    setQuizUI(false); refreshAll();
+    toast('答案: ['+s.id+'] '+s.name+' —— 对照手册复盘你的判断','ok');
+  }catch(e){ toast(e.message,'err'); setQuizUI(false); refreshAll(); }
 }
 
 /* ── 场景卡片 ── */
@@ -270,6 +315,7 @@ function bindCard(s){
 }
 
 /* ── 启动 ── */
+$('btn-quiz').onclick=startQuiz; $('btn-reveal').onclick=revealQuiz;
 pollMetrics(); refreshAll();
 setInterval(pollMetrics, 2000);
 setInterval(refreshAll, 3000);

@@ -34,12 +34,14 @@ public class MetricsController {
         m.put("heapMaxMb", toMb(heap.getMax()));
 
         // Metaspace（场景 02 的关键指标，等价 jstat -gcmetacapacity；注意 -gcutil 的 M 列是 used/committed 口径）
-        // 一位小数: 温和模式涨幅 ~3.6MB, 整数 MB 截断会让仪表盘看起来"触发了没反应"
+        // 一位小数: 温和模式涨幅 ~3.6MB, 整数 MB 截断会让仪表盘看起来"触发了没反应";
+        // committed 一并暴露——MaxMetaspaceSize 撞墙判定口径是 committed(场景02/01 §3.4)
         ManagementFactory.getMemoryPoolMXBeans().stream()
                 .filter(p -> p.getName().toLowerCase().contains("metaspace"))
                 .findFirst()
                 .ifPresent(p -> {
                     m.put("metaspaceUsedMb", toMb1(p.getUsage().getUsed()));
+                    m.put("metaspaceCommittedMb", toMb1(p.getUsage().getCommitted()));
                     m.put("metaspaceMaxMb", toMb(p.getUsage().getMax()));
                 });
 

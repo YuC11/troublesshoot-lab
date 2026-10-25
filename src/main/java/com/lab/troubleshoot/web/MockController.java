@@ -20,15 +20,17 @@ import java.util.Map;
 @RequestMapping("/api/mock")
 public class MockController {
 
-    /** 慢下游：睡 delayMs 后返回（模拟下游 GC/慢查询/容量不足导致的响应变慢） */
+    /** 慢下游：睡 delayMs 后返回（模拟下游 GC/慢查询/容量不足导致的响应变慢）；
+     *  delayMs 封顶 30s——无上限参数会占住 Tomcat 线程数分钟, 与「无超时」病灶本身混淆 */
     @GetMapping("/downstream")
     public Map<String, Object> downstream(@RequestParam(defaultValue = "3000") long delayMs,
                                           @RequestParam(defaultValue = "false") boolean fail) throws InterruptedException {
-        Thread.sleep(delayMs);
+        long clamped = Math.min(Math.max(delayMs, 0), 30_000);
+        Thread.sleep(clamped);
         if (fail) {
             // 模拟下游报错（演练错误传播时的备用开关）
             throw new IllegalStateException("mock downstream internal error");
         }
-        return Map.of("service", "mock-downstream", "tookMs", delayMs);
+        return Map.of("service", "mock-downstream", "tookMs", clamped);
     }
 }

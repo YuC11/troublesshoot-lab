@@ -45,7 +45,8 @@ PING_URL="http://localhost:${PORT}/api/health/ping"
 MYSQL_HOST="${MYSQL_HOST:-localhost}"; MYSQL_PORT="${MYSQL_PORT:-3306}"
 MYSQL_USER="${MYSQL_USER:-root}";      MYSQL_PASSWORD="${MYSQL_PASSWORD:-rootroot}"
 
-DO_STOP=0; DO_RESTART=0; DO_CLEAN=0; DO_CLEAN_ALL=0; DO_STATUS=0; DO_WAIT=0; ASSUME_YES=0
+DO_STOP=0; DO_RESTART=0; DO_CLEAN=0; DO_CLEAN_ALL=0; DO_STATUS=0; DO_DOCTOR=0; DO_WAIT=0; ASSUME_YES=0
+ARTHAS_HOME="${ARTHAS_HOME:-/Users/yc/environment/arthas-4.0.4}"
 
 usage() {
   sed -n '3,17p' "$0" | sed 's/^# \{0,1\}//'
@@ -117,7 +118,8 @@ import json, sys
 d = json.load(sys.stdin)
 up = d['uptimeSeconds']
 print(f\"    JVM: uptime {up//60}m{up%60}s | 堆 {d['heapUsedMb']}/{d['heapMaxMb']}MB \"
-      f\"| Metaspace {d.get('metaspaceUsedMb','?')}MB | 线程 {d['threadCount']} | 已加载类 {d['loadedClassCount']:,}\")" \
+      f\"| Metaspace {d.get('metaspaceUsedMb','?')}MB(已用)/{d.get('metaspaceCommittedMb','?')}MB(已提交,撞墙口径) \"
+      f\"| 线程 {d['threadCount']} | 已加载类 {d['loadedClassCount']:,}\")" \
       || echo "    JVM 指标: 解析失败(原始: $metrics)"
   fi
   if command -v mysql >/dev/null 2>&1; then
@@ -230,8 +232,12 @@ do_start() {
   # 教学 JVM 参数(每个参数都是 docs 里的教学点):
   #   小堆 256m 快速复现内存故障 / 512k 栈 / Metaspace 上限 96m(场景02:
   #   撞墙口径是 committed≈6KB/加载器≈6.7×used, 温和4000个需~25MB committed 余量, 64m 放不下) /
+  #   DirectMemory 上限 64m+NMT(场景17) / GC 全量事件流 logs/gc.log(jstat 是采样, GC日志是每次停顿的第一手记录;
+  #   -Xlog 语法: 段1=选择器gc, 段2=file输出, 段3=time/uptime装饰, 段4=轮转) /
   #   OOM 自动落 dump 到 dumps/ ; JAVA_OPTS_EXTRA 可追加覆盖(如 -Xmx512m)
   local java_opts="-Xms256m -Xmx256m -Xss512k -XX:MaxMetaspaceSize=96m \
+ -XX:MaxDirectMemorySize=64m -XX:NativeMemoryTracking=summary \
+ -Xlog:gc:file=logs/gc.log:time,uptime:filecount=3,filesize=20M \
  -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=./dumps -Dfile.encoding=UTF-8 \
  ${JAVA_OPTS_EXTRA:-}"
 
@@ -278,6 +284,54 @@ do_start() {
   fi
 }
 
+# ── 环境体检: JDK/Maven/MySQL/端口/Arthas/磁盘 逐项 ✅❌ (新机器上手第一件事) ──
+do_doctor() {
+  local fail=0
+  local chk; chk() { # chk <名称> <结果0/1> <明细>
+    if [ "$2" = 0 ]; then echo "  ✅ $1: $3"; else echo "  ❌ $1: $3"; fail=1; fi
+  }
+  echo "==> 环境体检 (-doctor)"
+  # JDK
+  if command -v java >/dev/null 2>&1; then
+    local jv; jv=$(java -version 2>&1 | head -1)
+    local major; major=$(java -version 2>&1 | sed -n 's/.*version "\([0-9]*\).*/\1/p')
+    [ "${major:-0}" -ge 21 ] 2>/dev/null; chk "JDK ≥21" $? "$jv"
+  else
+    chk "JDK ≥21" 1 "未安装 java"
+  fi
+  command -v mvn >/dev/null 2>&1; chk "Maven" $? "$(mvn -version 2>/dev/null | head -1 || echo 未安装)"
+  # MySQL 连通
+  if command -v mysql >/dev/null 2>&1; then
+    MYSQL_PWD="$MYSQL_PASSWORD" mysql --connect-timeout=3 -h "$MYSQL_HOST" -P "$MYSQL_PORT" \
+      -u "$MYSQL_USER" -N -e "SELECT 1" >/dev/null 2>&1
+    chk "MySQL 连通($MYSQL_HOST:$MYSQL_PORT)" $? "凭据 ${MYSQL_USER}/******"
+  else
+    chk "MySQL" 1 "未安装 mysql 客户端"
+  fi
+  # 端口
+  if lsof -i ":$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    local lpid; lpid=$(lsof -t -i ":$PORT" -sTCP:LISTEN 2>/dev/null | head -1)
+    if [ "$lpid" = "$(find_running_pid 2>/dev/null || true)" ]; then
+      echo "  ✅ 端口 $PORT: 本演练场占用 (pid=$lpid)"
+    else
+      chk "端口 $PORT" 1 "被其他进程占用 (pid=$lpid)"
+    fi
+  else
+    echo "  ✅ 端口 $PORT: 空闲"
+  fi
+  # Arthas
+  [ -f "$ARTHAS_HOME/arthas-boot.jar" ]; chk "Arthas 本地安装" $? "$ARTHAS_HOME"
+  # 磁盘
+  local free_gb; free_gb=$(df -g . | awk 'NR==2{print $4}')
+  [ "${free_gb:-0}" -ge 2 ] 2>/dev/null; chk "磁盘余量≥2G" $? "当前目录剩余 ${free_gb:-?}G"
+  if [ "$fail" = 0 ]; then
+    echo "==> 全部通过, 可以开始演练"
+  else
+    echo "==> 存在阻塞项, 先解决上方 ❌" >&2
+    return 1
+  fi
+}
+
 # ── 参数解析: 未知参数只报两行, 详情指向 -h ─────────────────────────────────
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -286,12 +340,13 @@ while [ $# -gt 0 ]; do
     -clean) DO_CLEAN=1 ;;
     -clean-all) DO_CLEAN=1; DO_CLEAN_ALL=1 ;;
     -status) DO_STATUS=1 ;;
+    -doctor) DO_DOCTOR=1 ;;
     -wait) DO_WAIT=1 ;;
     -y|--yes) ASSUME_YES=1 ;;
     -h|--help) usage; exit 0 ;;
     *)
       echo "lab.sh: 未知参数 '$1'" >&2
-      echo "用法: lab.sh [-stop] [-restart] [-status] [-clean] [-clean-all] [-wait] [-y] [-h]" >&2
+      echo "用法: lab.sh [-stop] [-restart] [-status] [-doctor] [-clean] [-clean-all] [-wait] [-y] [-h]" >&2
       exit 1 ;;
   esac
   shift
@@ -299,10 +354,14 @@ done
 
 mkdir -p logs dumps diagnostics
 
-# 状态查询是独立动作(不与启停组合): 输出一屏后结束
+# 状态/体检是独立动作(不与启停组合): 输出一屏后结束
 if [ "$DO_STATUS" = 1 ]; then
   do_status
   exit 0
+fi
+if [ "$DO_DOCTOR" = 1 ]; then
+  do_doctor
+  exit $?
 fi
 
 # 执行语义: stop/restart 都先停; clean(-all) 紧随其后; restart 最后再启动

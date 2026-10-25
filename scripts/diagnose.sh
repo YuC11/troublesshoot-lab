@@ -7,7 +7,7 @@
 # 原理: 很多故障是「瞬态」的, 等你慢慢一条条敲命令, 现场已经变了。
 # 相当于给进程拍 CT, 之后再从容分析, 重启也不怕丢证据。
 #
-# 工具选型: JDK 9+ 一律 jcmd 优先(演进映射见 docs/01 手册 4.2);
+# 工具选型: JDK 9+ 一律 jcmd 优先(演进映射见 docs/01 手册 §3.2);
 #           jstack/jmap 仅作 JDK 8 老服务器兜底。jstat 保留(流式趋势采样无 jcmd 等价)。
 # =============================================================================
 set -euo pipefail
@@ -19,7 +19,7 @@ if [ -z "${PID}" ]; then
   PID=$(ps aux | grep 'troubleshoot-lab' | grep -v grep | awk '{print $2}' | head -1 || true)
 fi
 if [ -z "${PID}" ]; then
-  echo "未找到 troubleshoot-lab 进程, 请先 ./scripts/start.sh"; exit 1
+  echo "未找到 troubleshoot-lab 进程, 请先 ./scripts/lab.sh"; exit 1
 fi
 
 OUT="diagnostics/$(date +%Y%m%d-%H%M%S)-pid${PID}"
@@ -72,3 +72,40 @@ echo "    CPU 高   → threads-by-cpu-threadprint.txt 找线程号, 在 thread-
 echo "    内存     → heap-info.txt 看分区快照, jstat-gcutil.txt 看趋势, class-histogram-top50.txt 看对象大头"
 echo "    死锁     → grep -A 10 'deadlock' thread-print-1.txt"
 echo "    句柄     → lsof-count.txt 与 lsof-by-file-top30.txt"
+echo "    复盘     → REPORT.md 已生成, 补全「影响面/根因/修复动作」三节"
+
+# 7. 复盘报告模板: 自动预填时间线与场景状态, 待填三节——「事故报告怎么写」与「怎么查」同等重要
+{
+  echo "# 事故复盘报告（模板, 自动生成于 $(date '+%F %T')）"
+  echo
+  echo "## 影响面（待填）"
+  echo "- 受影响接口/实例/时长:"
+  echo
+  echo "## 证据快照（自动预填）"
+  echo "| 文件 | 内容 |"
+  echo "|---|---|"
+  for f in thread-print-1.txt thread-print-2.txt threads-by-cpu-threadprint.txt heap-info.txt \
+           jstat-gcutil.txt class-histogram-top50.txt lsof-count.txt vm-flags.txt; do
+    [ -f "$OUT/$f" ] && echo "| $f | $(wc -l < "$OUT/$f" | tr -d ' ') 行 |"
+  done
+  echo
+  echo "## 场景状态（自动采集）"
+  curl -sf -m 3 http://localhost:8080/api/faults 2>/dev/null | python3 -c "
+import json,sys
+try:
+    for s in json.load(sys.stdin):
+        if s.get('state') != 'READY':
+            print(f\"- {s['order']:02d} [{s['id']}] state={s['state']} error={s.get('error') or '-'}\")
+except Exception as e:
+    print('(采集失败: %s)' % e)" || echo "- (应用未响应, 状态未采集)"
+  echo
+  echo "## 时间线（待填, 格式: HH:MM 事件/证据）"
+  echo
+  echo "## 根因（待填）"
+  echo
+  echo "## 修复动作（待填: 止血/治本分别记录）"
+  echo
+  echo "## 复盘待办（待填: 监控缺口/流程改进/防回归项）"
+  echo
+} > "$OUT/REPORT.md"
+echo "==> 复盘模板: $OUT/REPORT.md"

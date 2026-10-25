@@ -44,6 +44,27 @@ public class DatabaseInitializer implements ApplicationRunner {
 
     private final JdbcTemplate jdbc;
 
+    /** 数据倾斜百分比（环境变量 SEED_USER_SKEW, 0~95, 默认 0=均匀分布; 仅影响全新灌数） */
+    private static final int USER_SKEW_PCT = readSkewPct();
+    /** 倾斜模式的热点用户池: 500 个用户(0.1%)承接 SEED_USER_SKEW% 的订单 */
+    private static final int HOT_USER_POOL = 500;
+
+    private static int readSkewPct() {
+        try {
+            int v = Integer.parseInt(System.getenv().getOrDefault("SEED_USER_SKEW", "0").trim());
+            return Math.max(0, Math.min(95, v));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    /** 按倾斜配置抽 user_id: 命中热点池(1..500)或全量均匀(1..50万)——教学「测试环境正常, 生产倾斜变慢」 */
+    private long pickUserId(ThreadLocalRandom rnd) {
+        return (USER_SKEW_PCT > 0 && rnd.nextInt(100) < USER_SKEW_PCT)
+                ? 1 + rnd.nextInt(HOT_USER_POOL)
+                : 1 + rnd.nextInt(500_000);
+    }
+
     @Override
     public void run(ApplicationArguments args) {
         migrateLegacyIfNeeded();
@@ -210,6 +231,10 @@ public class DatabaseInitializer implements ApplicationRunner {
             return;
         }
         log.info("[初始化] 开始灌入 orders {} 行 × 29 列（企业级宽行, 预计 30~90s）...", ORDERS_ROWS);
+        if (USER_SKEW_PCT > 0) {
+            log.warn("[初始化] 数据倾斜已启用: {}% 订单落到热点用户 1..{} —— 教学点: 索引区分度与 ANALYZE 直方图",
+                    USER_SKEW_PCT, HOT_USER_POOL);
+        }
         long start = System.currentTimeMillis();
         ThreadLocalRandom rnd = ThreadLocalRandom.current();
         LocalDateTime base = LocalDateTime.of(2025, 1, 1, 0, 0, 0);
@@ -236,7 +261,7 @@ public class DatabaseInitializer implements ApplicationRunner {
                         return new Object[]{
                                 (long) i,
                                 "SO" + created.getYear() + String.format("%09d", i),   // 业务单号
-                                1 + rnd.nextInt(500_000),                              // user_id 1~50万(稀疏)
+                                pickUserId(rnd),                                       // user_id 1~50万(可倾斜)
                                 1 + rnd.nextInt(3_000),                                // merchant
                                 1 + rnd.nextInt(5),
                                 status,
