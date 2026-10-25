@@ -9,7 +9,7 @@
 #   ./scripts/lab.sh -status        状态一览(PID/端口/JVM含committed/数据行数)
 #   ./scripts/lab.sh -doctor        环境体检(JDK/Maven/MySQL/端口/Arthas/磁盘 逐项✅❌)
 #   ./scripts/lab.sh -clean         清除 MySQL 演练库(要求进程已停止; 交互确认, -y 跳过)
-#   ./scripts/lab.sh -clean-all     清库+演练产物(dumps/diagnostics/旧日志)
+#   ./scripts/lab.sh -clean-all     清库+全部产物与构建目录(完全重置, 可重建)
 #   组合: -stop -clean | -restart -clean | -restart -clean-all(工厂重置)
 #   选项: -wait 启动后等待数据灌数完成 | -y 跳过确认 | -h 帮助
 #   环境变量:
@@ -148,7 +148,7 @@ do_clean() {
     return 1
   fi
   local scope="MySQL 演练库 [${DB_NAME}]"
-  [ "$DO_CLEAN_ALL" = 1 ] && scope="${scope} + 演练产物(dumps/ diagnostics/ 旧日志)"
+  [ "$DO_CLEAN_ALL" = 1 ] && scope="${scope} + 全部产物(dumps/ diagnostics/ logs/ arthas-output/ target/ hs_err*)"
   echo "目标: ${MYSQL_HOST}:${MYSQL_PORT} 上的 ${scope} (账号 ${MYSQL_USER})"
   if [ "$ASSUME_YES" != 1 ]; then
     local c; read -r -p "确认删除? 该操作不可恢复 (y/N): " c || c=""
@@ -168,13 +168,15 @@ do_clean() {
   else
     echo "!! 未找到 mysql 客户端, 跳过删库(可手动执行: DROP DATABASE ${DB_NAME};)"
   fi
-  # ② 演练产物(-clean-all): 堆 dump(单个40MB+)/现场快照/轮转日志, 均为可重建的演练废弃物
+  # ② 全部产物(-clean-all): 完全回厂——堆dump/现场快照/复盘报告/Arthas输出/
+  #    全部日志(app+gc)/JVM崩溃文件/构建产物, 均为可重建的废弃物
+  #    (logs/ 整目录删: app.log + gc.log 轮转链; target/ 删: 下次启动自动重新 mvn package)
   if [ "$DO_CLEAN_ALL" = 1 ]; then
-    rm -rf dumps diagnostics
-    rm -f logs/app.log.1
-    echo "==> 演练产物已清除(dumps/ diagnostics/ 旧日志)"
+    rm -rf dumps diagnostics arthas-output logs target
+    rm -f hs_err_pid*.log ./*.hprof
+    echo "==> 产物已清除(dumps/ diagnostics/ logs/ arthas-output/ target/ hs_err*)"
   fi
-  echo "==> 清理完成。下次启动会自动重建库并重灌数据。"
+  echo "==> 清理完成。下次启动会自动重建库并重灌数据(约 2~4 分钟)。"
 }
 
 # ── 启动: 并发锁 → 幂等 → 前置检查 → 构建 → 后台拉起 → 健康检查 ─────────────

@@ -71,7 +71,7 @@ open http://localhost:8080
 ./scripts/lab.sh -stop                              # 优雅停止(PID身份校验防误杀)
 ./scripts/lab.sh -restart                           # 重启(灌数中重启也安全)
 ./scripts/lab.sh -clean                             # 清 MySQL 演练库(需先停止, -y 跳过确认)
-./scripts/lab.sh -clean-all                         # 清库+演练产物(dumps/diagnostics/旧日志)
+./scripts/lab.sh -clean-all                         # 清库+全部产物(logs/dumps/diagnostics/arthas-output/target)——完全重置
 ./scripts/lab.sh -restart -clean-all                # 工厂重置
 SEED_USER_SKEW=80 ./scripts/lab.sh -restart -clean-all   # 倾斜灌数(80%订单落1%热点用户)
 ./scripts/lab.sh -restart -wait                     # 重启并阻塞等灌数完成(脚本化/CI)
