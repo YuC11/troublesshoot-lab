@@ -15,7 +15,7 @@
     <artifactId>troubleshoot-lab</artifactId>
     <version>1.0.0</version>
     <name>troubleshoot-lab</name>
-    <description>线上故障排查演练场：16 个生产典型故障场景 + 分层引导 Runbook + Arthas 进阶</description>
+    <description>线上故障排查演练场：17 个生产典型故障场景 + 分层引导 Runbook + Arthas 进阶</description>
 
     <properties>
         <java.version>21</java.version>

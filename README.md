@@ -1,13 +1,13 @@
 # troubleshoot-lab · 线上故障排查演练场
 
-本地可跑、零外部依赖的 Java/Spring Boot 故障演练项目：**16 个生产典型故障场景**，
+本地可跑、零外部依赖的 Java/Spring Boot 故障演练项目：**17 个生产典型故障场景**，
 全部可 HTTP 触发/停止/反复演练，每个场景配套完整 Runbook
 （可观测性视角 → 原生工具定位 → 根因 → 修复对比 → 停止恢复验证 → Arthas 进阶）。
 数据层按**企业级订单域**建模（orders 100 万行 × 29 字段宽表 + order_item 300 万行等 5 张表）。
 目的不是展示故障，而是训练**线上排查思维与实践能力**。
 
 - JDK 21 · Spring Boot 3.4.5 · MySQL 8（本地） · Arthas 4.0.4（本地安装，不下载）
-- 核心契约：**停止即确定性回落**——16 个场景 stop 内置恢复动作，无需等待 GC 或重启（契约见 docs/01 §4.3）
+- 核心契约：**停止即确定性回落**——17 个场景 stop 内置恢复动作，无需等待 GC 或重启（契约见 docs/01 §4.3）
 - 设计模式：Strategy / Template Method / Registry / Builder / Facade（见 docs/01 附录）
 
 ## 快速开始
@@ -46,6 +46,7 @@ open http://localhost:8080
 | 14 | `slow-external-no-timeout` | 慢外部依赖 | HTTP 无超时级联拖垮 | 同上 |
 | 15 | `slow-lock-contention` | 锁竞争 | 锁内做慢 IO | 同上 |
 | 16 | `slow-db-pool-exhausted` | 连接池耗尽 ⭐综合 | 慢SQL+池小的连锁反应 | 同上 |
+| 17 | `oom-direct-memory` | 堆外内存 OOM | DirectBuffer/Netty 未释放，堆直方图看不见 | [02 手册](docs/02-内存类场景手册.md) |
 
 > ⚠️ **演练纪律：一次只触发一个场景**——多故障叠加是定位的地狱模式；
 > 动手排查前先 `./scripts/diagnose.sh` 留现场，瞬态故障不等慢条斯理的人。
@@ -55,22 +56,24 @@ open http://localhost:8080
 | 文档 | 内容 |
 |---|---|
 | [01 总纲](docs/01-排查方法论与工具优先级.md) | 文档地图与读法 · 问题全景 · 可观测性前置 · P0~P4 工具优先级 · macOS/Linux 差异 · **跨场景通用机制正主**（GC 惰性 / OOM catch 纪律 / 停止即回落契约 / jstat 口径陷阱） |
-| [02 内存类](docs/02-内存类场景手册.md) | 场景 01~04 |
+| [02 内存类](docs/02-内存类场景手册.md) | 场景 01~04、17（含容器内存模型附录） |
 | [03 CPU 类](docs/03-CPU类场景手册.md) | 场景 05~07 |
 | [04 线程与 IO 类](docs/04-线程与IO类场景手册.md) | 场景 08~11 |
-| [05 接口慢类](docs/05-接口慢类场景手册.md) | 场景 12~16（含订单域 schema 与索引设计附录） |
+| [05 接口慢类](docs/05-接口慢类场景手册.md) | 场景 12~16（含订单域 schema、索引设计与数据倾斜附录） |
 | [06 工具速查表](docs/06-工具速查表.md) | jcmd / Arthas / MySQL 纯命令查阅 |
 
 ## 常用命令
 
 ```bash
 ./scripts/lab.sh                                    # 启动(后台+健康检查)
-./scripts/lab.sh -status                            # 状态一览(PID/端口/JVM/数据行数)
+./scripts/lab.sh -status                            # 状态一览(PID/端口/JVM含committed/数据行数)
+./scripts/lab.sh -doctor                            # 环境体检(JDK/Maven/MySQL/端口/Arthas/磁盘)
 ./scripts/lab.sh -stop                              # 优雅停止(PID身份校验防误杀)
 ./scripts/lab.sh -restart                           # 重启(灌数中重启也安全)
 ./scripts/lab.sh -clean                             # 清 MySQL 演练库(需先停止, -y 跳过确认)
 ./scripts/lab.sh -clean-all                         # 清库+演练产物(dumps/diagnostics/旧日志)
 ./scripts/lab.sh -restart -clean-all                # 工厂重置
+SEED_USER_SKEW=80 ./scripts/lab.sh -restart -clean-all   # 倾斜灌数(80%订单落1%热点用户)
 ./scripts/lab.sh -restart -wait                     # 重启并阻塞等灌数完成(脚本化/CI)
 JAVA_OPTS_EXTRA='-Xmx512m' ./scripts/lab.sh         # 临时加大堆复现不同故障强度
 ./scripts/diagnose.sh                               # 一键快照现场到 diagnostics/
@@ -78,6 +81,7 @@ JAVA_OPTS_EXTRA='-Xmx512m' ./scripts/lab.sh         # 临时加大堆复现不�
 curl localhost:8080/api/faults                      # 场景列表
 curl -X POST 'localhost:8080/api/faults/oom-heap/trigger?mode=crash'   # 例: 真OOM+dump
 curl -X POST localhost:8080/api/faults/<id>/stop    # 停止任意场景
+curl -X POST localhost:8080/api/faults/quiz         # 盲测模式: 随机出题只给告警(reveal 揭晓)
 ```
 
 > PID 记录在 `logs/app.pid`，日志在 `logs/app.log`。

@@ -39,7 +39,6 @@ public class TroubleShootApplication {
                 .formatted(host, port);
         try (Connection conn = DriverManager.getConnection(url, user, password);
              Statement stmt = conn.createStatement()) {
-            // utf8mb4 是线上 MySQL 的标准选择（完整 UTF-8，含 emoji）
             stmt.executeUpdate("CREATE DATABASE IF NOT EXISTS troubleboot_lab "
                     + "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
             log.info("[初始化] 数据库 troubleboot_lab 已就绪 ({}:{})", host, port);
