@@ -4,7 +4,7 @@ import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 
 /**
- * 故障场景四大分类 —— 与 docs/00 排查方法论中的分类一一对应。
+ * 故障场景四大分类 —— 与 docs/01-排查方法论与工具优先级.md 的问题全景一一对应。
  */
 @Getter
 @RequiredArgsConstructor

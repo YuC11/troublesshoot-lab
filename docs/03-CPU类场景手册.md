@@ -3,6 +3,7 @@
 > 三个场景共用同一条定位主线（top → nid → Thread.print），差别在**栈落在哪**：
 > 业务自己的方法（05）/ JDK 正则框架（06）/ 序列化框架（07）。
 > 加上场景 04（栈查无此线程 = GC），四种「CPU 高」就此集齐。
+> 通用机制（GC 惰性 / 停止即回落契约）正主在 [01 总纲 §四](01-排查方法论与工具优先级.md)。
 > 🍎 标注 = macOS 差异，Linux 命令为主。
 
 ---
@@ -73,6 +74,15 @@ jcmd <pid> Thread.print | grep -A 20 "nid=0x$HEX"
 **Step 3 · 钉死证据**：隔 2~3s 再抓两次 `jcmd <pid> Thread.print`，栈**仍在同一行** = 死循环坐实
 
 （一次采样可能是巧合，三次采样是判决）。
+
+**Step 4 · 停止恢复验证**
+
+```bash
+curl -X POST http://localhost:8080/api/faults/cpu-busy-loop/stop
+```
+
+volatile 开关翻转 → 4 个 burner 线程退出循环 → **CPU 秒级回落**（01 总纲 §4.3 契约）。
+生产等价动作：修掉死循环（volatile/边界条件）+ 发版。
 
 ### 【根因】
 循环退出条件失效（本场景演示的是缺 `volatile` 的开关 + 无退出的计算循环）。
@@ -147,6 +157,9 @@ retransform /tmp/out/com/lab/troubleshoot/fault/cpu/BusyLoopScenario.class
 （本场景是 `RegexBacktrackScenario` 的 matches 调用行）。
 </details>
 
+**停止恢复验证**：`POST /api/faults/cpu-regex-backtrack/stop` → 开关翻转，
+回溯线程退出 → CPU 秒级回落（契约见 01 总纲 §4.3）。
+
 ### 【根因】
 嵌套量词 `(a+)+$`：外层每个分组起点都要枚举内层所有切分，复杂度 O(2ⁿ)。
 26 个字符即百万级回溯，30 字符就是秒级单次匹配。
@@ -201,6 +214,17 @@ top/Thread.print 同场景 05，看栈落在哪一层。
 栈在 Jackson —— 业务帧在栈中下部。**框架栈 ≠ 可以甩锅**：
 往下翻找到是谁把 4MB 对象图交给序列化器的（本场景是报表导出全量返回）。
 </details>
+
+**停止恢复验证**
+
+```bash
+curl -X POST http://localhost:8080/api/faults/cpu-json-storm/stop
+```
+
+stop 内置「开关翻转 → **await 线程真正退出 → System.gc()**」：worker 最后一轮的
+JSON 串+对象图（~15MB/线程）还在临终线程栈帧里，不等退出就 GC 收不掉——
+实测不等待时停止后堆反而冲到 144MB，修正后停止即回落 **16MB**（低于基线，
+连启动期垃圾一并回收）。这是「停止即回落」契约里最讲究时序的一个（01 总纲 §4.3）。
 
 ### 【根因】
 业务选择了「全量对象图 + 反复序列化」的方案：单次 4MB JSON ≈ 每秒几十 MB 的
