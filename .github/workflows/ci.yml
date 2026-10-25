@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    name: 单元测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      # 冒烟组(@Tag("smoke"))依赖本地 MySQL + 演练数据, CI 无 DB 环境排除;
+      # Spring 上下文在无 DB 时无法启动(Hikari 初始建连+灌数初始化器), 故不做 assumeTrue 依赖
+      - name: mvn test (excludedGroups=smoke)
+        run: mvn -B test -DexcludedGroups=smoke
+
+  quality:
+    name: 脚本与文档质量
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck 脚本体检(仅硬错误阻断)
+        run: |
+          shellcheck --version
+          for f in scripts/*.sh; do
+            echo "== $f"
+            shellcheck -S error "$f"
+          done
+      - name: 文档版式与旧引用扫描
+        run: |
+          cd docs
+          fail=0
+          while IFS= read -r hit; do echo "Step粘连: $hit"; fail=1; done < <(
+            awk 'prev ~ /^\*\*Step/ && ($0 ~ /^\*\*Step/ || ($0 !~ /^$/ && $0 !~ /^</ && $0 !~ /^```/ && $0 !~ /^[0-9]/)) {print FILENAME" "FNR} {prev=$0}' *.md)
+          while IFS= read -r hit; do echo "行内反引号URL: $hit"; fail=1; done < <(
+            grep -n '`[^`]*://[^`]*`' *.md)
+          while IFS= read -r hit; do echo "旧引用残留: $hit"; fail=1; done < <(
+            grep -rnE 'Downloads/paper|docs/00|scripts/start\.sh|阅读须知' *.md ../README.md)
+          exit $fail

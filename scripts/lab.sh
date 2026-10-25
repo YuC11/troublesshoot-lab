@@ -241,6 +241,7 @@ do_start() {
  -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=./dumps -Dfile.encoding=UTF-8 \
  ${JAVA_OPTS_EXTRA:-}"
 
+  # shellcheck disable=SC2086  # java_opts 有意按空白分词(展开为多个独立 JVM 参数)
   nohup "$java_bin" $java_opts -jar "$JAR" > "$LOG_FILE" 2>&1 &
   echo $! > "$PID_FILE"
   rmdir "$LOCK_DIR" 2>/dev/null || true   # PID 文件已落盘, 锁的使命结束
