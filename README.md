@@ -2,13 +2,13 @@
 
 一个**本地可跑、零外部依赖**（连你本机的 MySQL）的 Java/Spring Boot 故障演练项目：
 **16 个生产典型故障场景**，每个都可 HTTP 触发/停止/反复演练，配套
-「可观测性视角 → 原生工具定位 → 根因 → 修复对比 → Arthas 进阶」的完整 Runbook。
+「可观测性视角 → 原生工具定位 → 根因 → 修复对比 → 停止恢复验证 → Arthas 进阶」的完整 Runbook。
 数据层按**企业级订单域**建模（orders 100 万行 × 29 字段宽表 + order_item 300 万行等 5 张表，
 索引设计解读见 [docs/05 附录](docs/05-接口慢类场景手册.md)）。
 目的不是展示故障，而是训练**线上排查思维与实践能力**。
 
 - JDK 21 · Spring Boot 3.4.5 · MySQL 8（本地） · Arthas 4.0.4（本地 `/Users/yc/environment/arthas-4.0.4`）
-- 设计模式：Strategy + Template Method + Registry + Builder + Facade（详见 [docs/01 第五节](docs/01-排查方法论与工具优先级.md)）
+- 设计模式：Strategy + Template Method + Registry + Builder + Facade（详见 [docs/01 附录](docs/01-排查方法论与工具优先级.md)）
 
 ## 快速开始（3 步）
 
@@ -49,15 +49,19 @@ open http://localhost:8080
 | 15 | `slow-lock-contention` | 锁竞争 | 锁内做慢 IO | 同上 |
 | 16 | `slow-db-pool-exhausted` | 连接池耗尽 ⭐综合 | 慢SQL+池小的连锁反应 | 同上 |
 
-> 必读顺序：[01 排查方法论](docs/01-排查方法论与工具优先级.md)（含可观测性前置认知、
-> P0~P4 工具优先级、macOS/Linux 命令差异）→ 按兴趣进各手册 → [06 工具速查表](docs/06-工具速查表.md)。
+> 文档地图与两种读法（**闯关**：01 二/三节 → 控制台只看告警自己排查 → 卡住才看路线图；
+> **速查**：直接 06 拿命令）见 [01 总纲](docs/01-排查方法论与工具优先级.md) 开篇——
+> 它是全部 16 个场景的总纲：可观测性前置认知、P0~P4 工具优先级、macOS/Linux 命令差异，
+> 以及四个跨场景通用机制的正主（**GC 惰性 / OOM catch 纪律 / 停止即回落契约 / jstat 口径陷阱**），
+> 各场景手册正文只留「01 §x」指针。
 
 ## 带新人/自我训练的建议玩法
 
 1. **闯关模式**：控制台只看「告警现象」卡片，不看手册，独立排查 30 分钟；
 2. 排查时先问三个问题：**ping 快不快？GC 正常吗？线程都在等什么？**
 3. 卡住再看手册的「定位路线图」，最后才展开「分步命令」对照；
-4. 每个场景务必体验 **stop 恢复对比**（修复验证是排查闭环的一半）；
+4. 每个场景务必体验 **stop 恢复对比**（修复验证是排查闭环的一半；
+   16 个场景停止即确定性回落，契约见 [01 总纲 §4.3](docs/01-排查方法论与工具优先级.md)）；
 5. 场景 05/08/12 再用 **Arthas 复盘一遍**（`thread -n 3` / `thread -b` / `trace`），
    体会「一条命令等价手工三步」；
 6. 纪律：**一次只触发一个场景**；动手前 `./scripts/diagnose.sh` 留现场。
@@ -65,7 +69,7 @@ open http://localhost:8080
 ## 项目结构
 
 ```
-scripts/  lab.sh(统一管理: 启动/-stop/-clean) diagnose.sh(一键现场快照) arthas.sh(本地4.0.4, 自动attach演练场)
+scripts/  lab.sh(统一管理: 启动/-stop/-restart/-clean/-clean-all/-wait) diagnose.sh(一键现场快照) arthas.sh(本地4.0.4, 自动attach演练场)
 docs/     01方法论 02内存 03CPU 04线程IO 05接口慢 06速查表（6 份整合手册）
 src/      core/设计模式骨架  web/门面与业务接口  fault/{memory,cpu,threadio,slowapi}/16场景
 docker/   docker-compose.yml（备用 MySQL，demo 默认不用）
