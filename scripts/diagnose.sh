@@ -51,7 +51,7 @@ jcmd "$PID" Thread.print > "$OUT/thread-print-2.txt" 2>/dev/null \
 jcmd "$PID" GC.heap_info > "$OUT/heap-info.txt" 2>&1 || true
 jstat -gcutil "$PID" > "$OUT/jstat-gcutil.txt" 2>&1 || true
 jstat -gc "$PID" > "$OUT/jstat-gc.txt" 2>&1 || true
-jstat -gcmetaspace "$PID" > "$OUT/jstat-gcmetaspace.txt" 2>&1 || true
+jstat -gcmetacapacity "$PID" > "$OUT/jstat-gcmetacapacity.txt" 2>&1 || true
 
 # 4. 堆对象直方图: 活体分析谁占大头(byte[]? HashMap? 自定义类?)
 #    JDK 9+: GC.class_histogram 为正统; JDK 8 用 jmap -histo 兜底

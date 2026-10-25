@@ -21,7 +21,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * <p>【实现手法】把 {@link MetaspaceMarker} 的 .class 字节码读出一份，循环用
  * <b>新的 ClassLoader</b> 反复 defineClass——同一个类名在不同加载器里是 16 个、
  * 1600 个、6000 个互相独立的类，Metaspace 线性上涨直到 64m 打爆。
- * 与堆 OOM 的排查差异：jmap -histo 看不到元数据，要看 jstat -gcmetaspace
+ * 与堆 OOM 的排查差异：jmap -histo 看不到元数据，要看 jcmd GC.heap_info / jstat -gcmetacapacity
  * 与已加载类数（每个类的元数据都在 Metaspace，类卸载条件是「类加载器可回收」）。</p>
  *
  * <p>类卸载教学点：必须持有 loader 引用防止提前卸载；stop 后置空引用，
@@ -70,8 +70,10 @@ public class MetaspaceOomScenario extends AbstractFaultScenario {
     @Override
     public void doTrigger(Map<String, String> params) {
         String mode = strParam(params, "mode", "gentle");
-        // 实测每加载器约占 12~13KB 元数据: 64m 上限下 3000 个(≈38MB)温和安全, crash 模式无上限
-        int targetLoaders = intParam(params, "targetLoaders", 3000);
+        // 实测每加载器约 5~6KB 元数据(标记类极小, 加载器自身开销为主);
+        // 应用基线约 45MB(见 GC.heap_info), 2000 个 ≈ +11MB → 约 56MB, 距 64m 上限留足余量;
+        // crash 模式无上限, 会真实 OOM
+        int targetLoaders = intParam(params, "targetLoaders", 2000);
         oomOccurred = false;
 
         worker = new Thread(() -> {
@@ -112,7 +114,7 @@ public class MetaspaceOomScenario extends AbstractFaultScenario {
         }
         // 置空强引用 → 加载器可回收 → 类可卸载。验证: jcmd <pid> GC.run 后再看 Metaspace
         loaders.clear();
-        log.info("[oom-metaspace] 加载器引用已释放, 类将在 GC 后卸载 —— 用 jcmd {} GC.run + jstat -gcmetaspace 验证回落",
+        log.info("[oom-metaspace] 加载器引用已释放, 类将在 GC 后卸载 —— 用 jcmd {} GC.run + jcmd GC.heap_info 验证回落",
                 pid());
     }
 

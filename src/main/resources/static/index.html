@@ -126,7 +126,7 @@
   <!-- JVM 仪表 -->
   <div class="metrics">
     <div class="meter"><div class="k">HEAP 堆内存</div><div class="v"><span id="m-heap">--</span><small> / <span id="m-heapmax">--</span> MB</small></div><div class="bar"><i id="b-heap"></i></div><div class="sub" id="s-heap">jstat -gcutil</div></div>
-    <div class="meter"><div class="k">METASPACE 元空间</div><div class="v"><span id="m-meta">--</span><small> / 64 MB</small></div><div class="bar"><i id="b-meta"></i></div><div class="sub">jstat -gcmetaspace</div></div>
+    <div class="meter"><div class="k">METASPACE 元空间</div><div class="v"><span id="m-meta">--</span><small> / 64 MB</small></div><div class="bar"><i id="b-meta"></i></div><div class="sub">jcmd GC.heap_info</div></div>
     <div class="meter"><div class="k">THREADS 线程</div><div class="v" id="m-thr">--</div><div class="bar"><i id="b-thr" style="width:0"></i></div><div class="sub">peak <span id="m-thrpeak">--</span></div></div>
     <div class="meter"><div class="k">CLASSES 已加载类</div><div class="v" id="m-cls">--</div><div class="sub">Metaspace 场景观察它</div></div>
     <div class="meter"><div class="k">CPU 进程占用</div><div class="v"><span id="m-cpu">--</span><small> %</small></div><div class="bar"><i id="b-cpu"></i></div><div class="sub">system <span id="m-syscpu">--</span>%</div></div>

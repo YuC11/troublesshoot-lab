@@ -33,7 +33,7 @@ public class MetricsController {
         m.put("heapCommittedMb", toMb(heap.getCommitted()));
         m.put("heapMaxMb", toMb(heap.getMax()));
 
-        // Metaspace（场景 02 的关键指标，等价 jstat -gcmetaspace）
+        // Metaspace（场景 02 的关键指标，等价 jstat -gcmetacapacity；注意 -gcutil 的 M 列是 used/committed 口径）
         ManagementFactory.getMemoryPoolMXBeans().stream()
                 .filter(p -> p.getName().toLowerCase().contains("metaspace"))
                 .findFirst()
