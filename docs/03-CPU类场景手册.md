@@ -29,8 +29,13 @@ jcmd <pid> Thread.print | grep -A 20 'nid=0x<hex>' → 读栈: 类.方法(文件
 ### 【分步排查】
 
 **Step 1 · 线程级 CPU 排名**
-Linux: `top -Hp <pid>`，按 P 排序取前几。
-🍎 macOS 本机演练：`jcmd <pid> Thread.print | sed -E 's/^"([^"]+)".*cpu=([0-9.]+)ms.*/\2 \1/' | sort -rn | head -6`
+
+```bash
+top -Hp <pid>    # Linux, 按 P 排序取前几
+# 🍎 macOS 本机演练：
+jcmd <pid> Thread.print | sed -E 's/^"([^"]+)".*cpu=([0-9.]+)ms.*/\2 \1/' | sort -rn | head -6
+```
+
 <details><summary>macOS 实测输出</summary>
 
 ```
@@ -66,6 +71,7 @@ jcmd <pid> Thread.print | grep -A 20 "nid=0x$HEX"
 </details>
 
 **Step 3 · 钉死证据**：隔 2~3s 再抓两次 `jcmd <pid> Thread.print`，栈**仍在同一行** = 死循环坐实
+
 （一次采样可能是巧合，三次采样是判决）。
 
 ### 【根因】
