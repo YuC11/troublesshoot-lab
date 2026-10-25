@@ -77,8 +77,10 @@ dumps/ diagnostics/ logs/   演练产物（已 gitignore）
 ```bash
 ./scripts/lab.sh                                    # 统一管理入口: 启动(后台+健康检查)
 ./scripts/lab.sh -stop                              # 优雅停止(未运行时友好提示, PID身份校验防误杀)
+./scripts/lab.sh -restart                           # 重启(未运行则直接启动; 灌数中重启也安全)
 ./scripts/lab.sh -clean                             # 清除MySQL演练库(需先停止, 交互确认, -y 跳过)
 ./scripts/lab.sh -stop -clean                       # 组合: 停止并清库
+./scripts/lab.sh -restart -clean                    # 完全重置: 停止+清库+重启
 ./scripts/diagnose.sh                               # 一键快照现场到 diagnostics/
 ./scripts/arthas.sh                                 # Arthas attach（交互）
 curl localhost:8080/api/faults                      # 场景列表

@@ -166,10 +166,32 @@ public class DatabaseInitializer implements ApplicationRunner {
 
     // ==================== 灌数 ====================
 
+    private long countOf(String table) {
+        Long n = jdbc.queryForObject("SELECT COUNT(*) FROM " + table, Long.class);
+        return n == null ? 0 : n;
+    }
+
+    /**
+     * 部分数据守卫：上次灌数被中断（如灌数中执行了 -restart/进程被杀）时表里会留下
+     * 部分行——直接重灌必然主键冲突、应用起不来。守卫策略：非空但不足目标行数 →
+     * TRUNCATE 后从头灌（演练数据可随意重建，TRUNCATE 成本远低于逐行去重）。
+     *
+     * @return true = 表已就绪可跳过灌数
+     */
+    private boolean skipOrReset(String table, long count, long targetRows) {
+        if (count >= targetRows) {
+            log.info("[初始化] {} 已有 {} 行, 跳过灌数", table, count);
+            return true;
+        }
+        if (count > 0) {
+            log.warn("[初始化] {} 仅 {} 行(上次灌数被中断), TRUNCATE 后重新灌入", table, count);
+            jdbc.execute("TRUNCATE TABLE " + table);
+        }
+        return false;
+    }
+
     private void seedUsers() {
-        Long count = jdbc.queryForObject("SELECT COUNT(*) FROM users", Long.class);
-        if (count != null && count >= USERS_ROWS) {
-            log.info("[初始化] users 已有 {} 行, 跳过灌数", count);
+        if (skipOrReset("users", countOf("users"), USERS_ROWS)) {
             return;
         }
         jdbc.batchUpdate("INSERT INTO users(id, username, email, status, register_channel, last_login_at, created_at) VALUES (?,?,?,?,?,?,?)",
@@ -184,9 +206,7 @@ public class DatabaseInitializer implements ApplicationRunner {
     }
 
     private void seedOrders() {
-        Long count = jdbc.queryForObject("SELECT COUNT(*) FROM orders", Long.class);
-        if (count != null && count >= ORDERS_ROWS) {
-            log.info("[初始化] orders 已有 {} 行, 跳过灌数", count);
+        if (skipOrReset("orders", countOf("orders"), ORDERS_ROWS)) {
             return;
         }
         log.info("[初始化] 开始灌入 orders {} 行 × 29 列（企业级宽行, 预计 30~90s）...", ORDERS_ROWS);
@@ -259,9 +279,7 @@ public class DatabaseInitializer implements ApplicationRunner {
     }
 
     private void seedOrderItem() {
-        Long count = jdbc.queryForObject("SELECT COUNT(*) FROM order_item", Long.class);
-        if (count != null && count >= ORDER_ITEM_ROWS) {
-            log.info("[初始化] order_item 已有 {} 行, 跳过灌数", count);
+        if (skipOrReset("order_item", countOf("order_item"), ORDER_ITEM_ROWS)) {
             return;
         }
         log.info("[初始化] 开始灌入 order_item {} 行（order_id 升序写入避免随机页分裂, 预计 1~3min）...", ORDER_ITEM_ROWS);

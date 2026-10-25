@@ -5,17 +5,19 @@
 # 用法:
 #   ./scripts/lab.sh                启动(后台运行+健康检查, PID 记录到 logs/app.pid)
 #   ./scripts/lab.sh -stop          停止(SIGTERM 优雅关闭, 超时 SIGKILL; 未运行时友好提示)
+#   ./scripts/lab.sh -restart       重启(未运行则直接启动; 与 -clean 组合=完全重置)
 #   ./scripts/lab.sh -clean         清除 MySQL 演练库(要求进程已停止; 交互确认, -y 跳过)
-#   ./scripts/lab.sh -stop -clean   组合: 先停止再清库
-#   通用: -y 跳过确认 | -h 帮助
+#   组合: -stop -clean | -restart -clean ;  通用: -y 跳过确认 | -h 帮助
 #
 # 健壮性设计(为什么这么做):
 #   * 停止前校验 PID 身份(命令行含 troubleshoot-lab) —— 防 PID 复用后误杀无关进程
 #   * PID 文件陈旧(进程已死/已被复用)时自动回退 jps/ps 发现, 不盲信文件
 #   * -clean 在应用运行时拒绝执行 —— 运行中删库等于制造真事故; 必须先 -stop 或用组合
-#   * 重复启动幂等: 已运行则报告 PID 后退出, 不二次拉起
-#   * 启动前检查 java(需 ≥21)/mvn/端口占用; 启动后健康检查 + 灌数进度提示
-#   * stop 失败(进程杀不掉)返回非零, 组合命令据此中断, 不会带病清库
+#   * 启动幂等: 已运行则报告 PID 后退出; restart 天然幂等(未运行就直接启动)
+#   * 启动前检查 java(需 ≥21)/端口占用; 启动后健康检查 + 灌数进度提示
+#   * stop 失败(进程杀不掉)返回非零, 组合命令据此中断, 不会带病清库/重启
+#   * 端口支持 PORT 环境变量覆盖(需与 application.yml 的 server.port 一致)
+#   * app.log 超过 20MB 自动轮转为 .1, 防长期演练日志膨胀
 # =============================================================================
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -23,15 +25,29 @@ cd "$(dirname "$0")/.."
 JAR=target/troubleshoot-lab-1.0.0.jar
 PID_FILE=logs/app.pid
 LOG_FILE=logs/app.log
+LOG_ROTATE_BYTES=$((20 * 1024 * 1024))
 DB_NAME=troubleboot_lab
+PORT="${PORT:-8080}"   # 需与 application.yml 的 server.port 一致; 可 PORT=9090 ./scripts/lab.sh 覆盖
+PING_URL="http://localhost:${PORT}/api/health/ping"
 # 凭据与环境变量覆盖规则与 application.yml 保持一致
 MYSQL_HOST="${MYSQL_HOST:-localhost}"; MYSQL_PORT="${MYSQL_PORT:-3306}"
 MYSQL_USER="${MYSQL_USER:-root}";      MYSQL_PASSWORD="${MYSQL_PASSWORD:-rootroot}"
 
-DO_STOP=0; DO_CLEAN=0; ASSUME_YES=0
+DO_STOP=0; DO_RESTART=0; DO_CLEAN=0; ASSUME_YES=0
 
 usage() {
-  sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+  cat <<'EOF'
+用法: lab.sh [动作...] [选项]
+  (无动作)          启动服务(后台运行+健康检查)
+  -stop             停止服务
+  -restart          重启服务(未运行则直接启动)
+  -clean            清除 MySQL 演练库(需已停止, 交互确认)
+  -stop -clean      停止并清库
+  -restart -clean   完全重置: 停止+清库+重新启动
+选项:
+  -y                跳过 -clean 的交互确认
+  -h                显示本帮助
+EOF
 }
 
 # ── 进程发现: PID 文件(校验身份) → jps → ps ─────────────────────────────────
@@ -81,7 +97,7 @@ do_clean() {
   local pid; pid=$(find_running_pid 2>/dev/null || true)
   if [ -n "$pid" ]; then
     echo "!! 拒绝清库: 应用正在运行(pid=$pid), 运行中删库会制造真事故"
-    echo "   先停止: ./scripts/lab.sh -stop    或组合: ./scripts/lab.sh -stop -clean"
+    echo "   先停止: ./scripts/lab.sh -stop    或组合: ./scripts/lab.sh -restart -clean"
     return 1
   fi
   if ! command -v mysql >/dev/null 2>&1; then
@@ -107,7 +123,7 @@ do_clean() {
 do_start() {
   local pid; pid=$(find_running_pid 2>/dev/null || true)
   if [ -n "$pid" ]; then
-    echo "==> 已在运行 (pid=$pid): http://localhost:8080  —— 如需重启请先 -stop"; return 0
+    echo "==> 已在运行 (pid=$pid): http://localhost:${PORT}  —— 如需重启请用 -restart"; return 0
   fi
 
   # 前置检查: java 版本(编译目标是 21, 低版本 JDK 无法加载 61.0 字节码)
@@ -122,8 +138,8 @@ do_start() {
 
   # 前置检查: 端口被非本应用进程占用(占用者不明时启动必然失败, 提前暴露)
   if command -v lsof >/dev/null 2>&1 \
-     && lsof -nP -iTCP:8080 -sTCP:LISTEN 2>/dev/null | grep -q LISTEN; then
-    echo "!! 端口 8080 已被其他进程占用: lsof -nP -iTCP:8080 -sTCP:LISTEN 查看占用者"; return 1
+     && lsof -nP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | grep -q LISTEN; then
+    echo "!! 端口 ${PORT} 已被其他进程占用: lsof -nP -iTCP:${PORT} -sTCP:LISTEN 查看占用者"; return 1
   fi
 
   # 构建(源码比 jar 新时重建; 需要 mvn)
@@ -136,6 +152,12 @@ do_start() {
   fi
 
   mkdir -p logs dumps diagnostics
+
+  # 日志轮转: 上一次运行留下过大日志时归档, 防长期演练膨胀
+  if [ -f "$LOG_FILE" ] && [ "$(wc -c < "$LOG_FILE" 2>/dev/null || echo 0)" -gt "$LOG_ROTATE_BYTES" ]; then
+    mv "$LOG_FILE" "${LOG_FILE}.1"
+    echo "==> 旧日志已轮转: ${LOG_FILE}.1"
+  fi
 
   # 教学 JVM 参数(每个参数都是 docs 里的教学点):
   #   小堆 256m 快速复现内存故障 / 512k 栈 / Metaspace 上限 64m(场景02) /
@@ -150,7 +172,7 @@ do_start() {
 
   local i; local ready=0
   for i in $(seq 1 120); do
-    if curl -sf -m 2 http://localhost:8080/api/health/ping >/dev/null 2>&1; then ready=1; break; fi
+    if curl -sf -m 2 "$PING_URL" >/dev/null 2>&1; then ready=1; break; fi
     if ! kill -0 "$new_pid" 2>/dev/null; then
       echo "!! 进程启动后异常退出, 日志尾部:"; tail -15 "$LOG_FILE"; return 1
     fi
@@ -160,28 +182,42 @@ do_start() {
     echo "!! 120s 未就绪(可能卡在构建/灌数), 最近日志:"; tail -15 "$LOG_FILE"
     echo "   进程保留(pid=$new_pid)以便排查, 详情: tail -f $LOG_FILE"; return 1
   fi
-  echo "==> 就绪: http://localhost:8080 (pid=$new_pid)"
+  echo "==> 就绪: http://localhost:${PORT} (pid=$new_pid)"
   if grep -q "开始灌入" "$LOG_FILE" 2>/dev/null && ! grep -q "初始化完成" "$LOG_FILE" 2>/dev/null; then
     echo "==> 首次灌数进行中(约 2~4 分钟, 期间 DB 接口暂不可用), 跟踪: tail -f $LOG_FILE"
   fi
 }
 
-# ── 参数解析: -stop / -clean / -y / -h(其余一律报错) ────────────────────────
+# ── 参数解析: 未知参数只报两行, 详情指向 -h ─────────────────────────────────
 while [ $# -gt 0 ]; do
   case "$1" in
     -stop) DO_STOP=1 ;;
+    -restart) DO_RESTART=1 ;;
     -clean) DO_CLEAN=1 ;;
     -y|--yes) ASSUME_YES=1 ;;
     -h|--help) usage; exit 0 ;;
-    *) echo "未知参数: $1"; usage; exit 1 ;;
+    *)
+      echo "lab.sh: 未知参数 '$1'" >&2
+      echo "用法: lab.sh [-stop] [-restart] [-clean] [-y] [-h]  —— 详情: ./scripts/lab.sh -h" >&2
+      exit 1 ;;
   esac
   shift
 done
 
 mkdir -p logs dumps diagnostics
 
-# 执行顺序: 先 stop 后 clean(组合语义); 两者都没指定 = 启动
-# stop 失败(返回非零)时 set -e 会中断, 保证组合命令不会带病清库
-if [ "$DO_STOP" = 1 ]; then do_stop; fi
-if [ "$DO_CLEAN" = 1 ]; then do_clean; fi
-if [ "$DO_STOP" = 0 ] && [ "$DO_CLEAN" = 0 ]; then do_start; fi
+# 执行语义: stop/restart 都先停; clean 紧随其后; restart 最后再启动
+# (-restart -clean = 完全重置: 停止→清库→启动)。
+# 前面任一步失败(非零)时 set -e 中断, 不会带病执行后续步骤。
+if [ "$DO_STOP" = 1 ] || [ "$DO_RESTART" = 1 ]; then
+  do_stop
+fi
+if [ "$DO_CLEAN" = 1 ]; then
+  do_clean
+fi
+if [ "$DO_RESTART" = 1 ]; then
+  echo "==> [-restart] 重新启动..."
+  do_start
+elif [ "$DO_STOP" = 0 ] && [ "$DO_CLEAN" = 0 ]; then
+  do_start
+fi
