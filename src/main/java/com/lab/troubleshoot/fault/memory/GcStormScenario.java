@@ -102,8 +102,14 @@ public class GcStormScenario extends AbstractFaultScenario {
     @Override
     public void doStop() {
         running = false;
+        // 与场景 01 同理: 清空引用后显式触发 GC——风暴线程停止后分配压力归零,
+        // 不主动 GC 的话老年代里 170MB 填料要等到下一次 Young GC 才会被并发周期回收
+        long fillerMb = oldGenFiller.stream().mapToLong(a -> a.length).sum() >> 20;
         oldGenFiller.clear();
-        log.info("[gc-storm] 填料已清空、风暴线程退出 —— jstat -gcutil {} 1000 应看到 FGC 不再增长, CPU 回落", pid());
+        long beforeMb = ManagementFactory.getMemoryMXBean().getHeapMemoryUsage().getUsed() >> 20;
+        System.gc();
+        log.info("[gc-storm] 已清空 {} MB 填料并触发 Full GC: 堆 {} MB → 回落, "
+                + "FGC 不再增长, CPU 回落", fillerMb, beforeMb);
     }
 
     @Override

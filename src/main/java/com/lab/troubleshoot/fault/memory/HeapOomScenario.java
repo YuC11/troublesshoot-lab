@@ -106,9 +106,24 @@ public class HeapOomScenario extends AbstractFaultScenario {
         if (worker != null) {
             worker.interrupt();
         }
-        // 清空缓存 = 修复「无界缓存」：stop 前后各看一次 jstat，验证堆回落——修复验证闭环
+        long freedMb = heldMb();
+        // 教学核心: 引用清空 ≠ 内存释放。clear() 只让 byte[] 变得「不可达」,
+        // jstat 的 O 列要等一次真实的老年代回收动作才会回落。而停止后应用几乎零分配,
+        // Eden 装不满 → 不触发 Young GC → G1 不做 IHOP 检查 → 并发标记周期不启动,
+        // 死掉的 humongous 对象(10MB > region 一半, 直接进老年代)会长期占着 O≈100%
+        // (实测停止后 60s 内 YGC/CGC 全程冻结)。所以这里显式 System.gc()——
+        // 等价生产上的 jcmd <pid> GC.run, 让「修复 → 验证」的回落立即可见。
+        long beforeMb = ManagementFactory.getMemoryMXBean().getHeapMemoryUsage().getUsed() >> 20;
         unboundedCache.clear();
-        log.info("[oom-heap] 缓存已清空({} MB 释放), 触发可见的堆回落", heldMb());
+        System.gc();
+        try {
+            Thread.sleep(500); // 给 GC 一点时间, 让日志里的前后对比拿到真实数字
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        long afterMb = ManagementFactory.getMemoryMXBean().getHeapMemoryUsage().getUsed() >> 20;
+        log.info("[oom-heap] 已清空 {} MB 缓存并触发 Full GC: 堆 {} MB → {} MB"
+                + " —— jstat -gcutil 的 O 列应立即回落", freedMb, beforeMb, afterMb);
     }
 
     @Override

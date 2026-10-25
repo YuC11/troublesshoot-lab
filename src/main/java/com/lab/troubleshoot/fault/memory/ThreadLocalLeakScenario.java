@@ -112,8 +112,10 @@ public class ThreadLocalLeakScenario extends AbstractFaultScenario {
             pool.shutdownNow();
             pool = null;
         }
-        log.info("[leak-threadlocal] 已关闭线程池(线程死亡释放 ThreadLocalMap)。本次演练共 {} 个 ThreadLocal 实例被修复"
-                + "——生产正解: finally 中 tl.remove()", toClear.size());
+        // 线程死亡后 value 才不可达; 显式 GC 让堆回落立即可见(引用清空 ≠ 内存释放, 同场景 01)
+        System.gc();
+        log.info("[leak-threadlocal] 已关闭线程池(线程死亡释放 ThreadLocalMap)并触发 GC。本次演练共 {} 个 "
+                + "ThreadLocal 实例被修复 —— 生产正解: finally 中 tl.remove()", toClear.size());
     }
 
     @Override
