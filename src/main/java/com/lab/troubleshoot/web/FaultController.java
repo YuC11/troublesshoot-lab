@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * 故障演练统一门面 —— <b>Facade 门面模式</b>。
  *
  * <p>REST 层不认识任何具体故障：全部请求经注册中心按 ID 路由到策略实现。
- * 17 个场景共用 3 个端点的「一套 API 治理全部故障」，控制台因此可以用统一组件渲染所有卡片。</p>
+ * 17 个场景共用 trigger/stop/status 三端点的「一套 API 治理全部故障」（另附盲测 quiz/reveal 两端点），控制台因此可以用统一组件渲染所有卡片。</p>
  *
  * <p>API 一览：</p>
  * <ul>
