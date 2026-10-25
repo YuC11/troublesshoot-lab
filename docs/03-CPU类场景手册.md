@@ -1,6 +1,6 @@
 # 03 · CPU 类场景手册（场景 05~07）
 
-> 三个场景共用同一条定位主线（top → nid → jstack），差别在**栈落在哪**：
+> 三个场景共用同一条定位主线（top → nid → Thread.print），差别在**栈落在哪**：
 > 业务自己的方法（05）/ JDK 正则框架（06）/ 序列化框架（07）。
 > 加上场景 04（栈查无此线程 = GC），四种「CPU 高」就此集齐。
 > 🍎 标注 = macOS 差异，Linux 命令为主。
@@ -23,14 +23,14 @@
 ### 【定位路线图】（Linux 标准链路，务必形成肌肉记忆）
 ```
 top -Hp <pid> 找最耗CPU的 TID → printf '%x' TID 转十六进制 →
-jstack <pid> | grep -A 20 'nid=0x<hex>' → 读栈: 类.方法(文件:行号) → 看代码
+jcmd <pid> Thread.print | grep -A 20 'nid=0x<hex>' → 读栈: 类.方法(文件:行号) → 看代码
 ```
 
 ### 【分步排查】
 
 **Step 1 · 线程级 CPU 排名**
 Linux: `top -Hp <pid>`，按 P 排序取前几。
-🍎 macOS 本机演练：`jstack <pid> | sed -E 's/^"([^"]+)".*cpu=([0-9.]+)ms.*/\2 \1/' | sort -rn | head -6`
+🍎 macOS 本机演练：`jcmd <pid> Thread.print | sed -E 's/^"([^"]+)".*cpu=([0-9.]+)ms.*/\2 \1/' | sort -rn | head -6`
 <details><summary>macOS 实测输出</summary>
 
 ```
@@ -40,7 +40,7 @@ Linux: `top -Hp <pid>`，按 P 排序取前几。
 54140.45 cpu-burner
  4752.73 DestroyJavaVM
 ```
-jstack 的线程头自带 `cpu=累计毫秒`。**差分**两次（隔 3s）取增量就是实时 CPU，
+Thread.print 的线程头自带 `cpu=累计毫秒`。**差分**两次（隔 3s）取增量就是实时 CPU，
 效果等价 Linux 的 top -Hp。（汇总写法见 06 速查表。）
 </details>
 
@@ -48,10 +48,10 @@ jstack 的线程头自带 `cpu=累计毫秒`。**差分**两次（隔 3s）取�
 ```bash
 TID=8423
 HEX=$(printf '%x' $TID)
-jstack <pid> | grep -A 20 "nid=0x$HEX"
+jcmd <pid> Thread.print | grep -A 20 "nid=0x$HEX"
 ```
 🍎 macOS：nid 是线程名后**方括号里的十进制数**，如 `"cpu-burner" #57 [29703]`，
-直接 `jstack <pid> | grep -A 20 '\[29703\]'` 即可，无需转进制。
+直接 `jcmd <pid> Thread.print | grep -A 20 '\[29703\]'` 即可，无需转进制。
 
 <details><summary>实测栈帧（两平台一致）</summary>
 
@@ -65,7 +65,7 @@ jstack <pid> | grep -A 20 "nid=0x$HEX"
 栈顶直指 `burnCpu` 第 95 行 —— 从告警到代码行，两分钟内闭环。
 </details>
 
-**Step 3 · 钉死证据**：隔 2~3s 再抓两次 jstack，栈**仍在同一行** = 死循环坐实
+**Step 3 · 钉死证据**：隔 2~3s 再抓两次 `jcmd <pid> Thread.print`，栈**仍在同一行** = 死循环坐实
 （一次采样可能是巧合，三次采样是判决）。
 
 ### 【根因】
@@ -98,7 +98,7 @@ thread -n 3
 "cpu-burner" Id=373 deltaTime=205ms time=4603ms RUNNABLE
     at com.lab.troubleshoot.fault.cpu.BusyLoopScenario.burnCpu(BusyLoopScenario.java:95)
 ```
-一条命令 = top -Hp + 转进制 + jstack 三步，且直接给出**行号**。
+一条命令 = top -Hp + 转进制 + Thread.print 三步，且直接给出**行号**。
 
 **热修复全流程**（线上不能立刻发版时的止血）：
 ```
@@ -182,7 +182,7 @@ watch com.lab.troubleshoot.fault.cpu.RegexBacktrackScenario * '{params,throwExp}
 - 与 05/06 的区分点：RT 变长但**不挂死**、不超时，温水煮青蛙型。
 
 ### 【定位路线图】
-top/jstack 同场景 05，看栈落在哪一层。
+top/Thread.print 同场景 05，看栈落在哪一层。
 <details><summary>实测栈帧</summary>
 
 ```

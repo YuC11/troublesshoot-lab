@@ -6,6 +6,9 @@
 # GC状态/句柄/网络连接)固化到 diagnostics/<时间戳>/ 目录。
 # 原理: 很多故障是「瞬态」的, 等你慢慢一条条敲命令, 现场已经变了。
 # 相当于给进程拍 CT, 之后再从容分析, 重启也不怕丢证据。
+#
+# 工具选型: JDK 9+ 一律 jcmd 优先(演进映射见 docs/01 手册 4.2);
+#           jstack/jmap 仅作 JDK 8 老服务器兜底。jstat 保留(流式趋势采样无 jcmd 等价)。
 # =============================================================================
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -31,23 +34,29 @@ top -l 1 -o cpu -stats pid,command,cpu,time -n 30 > "$OUT/top-threads-hint.txt" 
 ps -M -o tid,pcpu,time,comm -p "$PID" 2>/dev/null | sort -k2 -rn | head -40 > "$OUT/threads-by-cpu.txt" \
   || ps -T -o spid,pcpu,time,comm -p "$PID" 2>/dev/null | sort -k2 -rn | head -40 > "$OUT/threads-by-cpu.txt" \
   || true
-# macOS 兜底: jstack 的 cpu= 字段直接按线程 CPU 排序(跨平台, 生产也可用)
-jstack "$PID" 2>/dev/null | sed -E 's/^"([^"]+)".*cpu=([0-9.]+)ms.*/\2 \1/' | sort -rn | head -20 \
-  > "$OUT/threads-by-cpu-jstack.txt" || true
+# 跨平台兜底: Thread.print 的 cpu= 字段直接按线程 CPU 排序(jcmd 与 jstack 输出同格式)
+jcmd "$PID" Thread.print 2>/dev/null | sed -E 's/^"([^"]+)".*cpu=([0-9.]+)ms.*/\2 \1/' \
+  | grep -E '^[0-9]+(\.[0-9]+)? ' | sort -rn | head -20 \
+  > "$OUT/threads-by-cpu-threadprint.txt" || true
 
 # 2. 线程栈 ×2 (间隔2s): 连续采样才能看出「钉在同一处」的栈
-jstack "$PID" > "$OUT/jstack-1.txt" 2>&1 || true
+#    JDK 9+: jcmd Thread.print 为正统; JDK 8 老服务器用 jstack 兜底
+jcmd "$PID" Thread.print > "$OUT/thread-print-1.txt" 2>/dev/null \
+  || jstack "$PID" > "$OUT/thread-print-1.txt" 2>&1 || true
 sleep 2
-jstack "$PID" > "$OUT/jstack-2.txt" 2>&1 || true
+jcmd "$PID" Thread.print > "$OUT/thread-print-2.txt" 2>/dev/null \
+  || jstack "$PID" > "$OUT/thread-print-2.txt" 2>&1 || true
 
-# 3. GC 状态: 新生代/老年代/Metaspace 占比与 GC 次数(累计值, 前后对比看趋势)
+# 3. GC 状态: 堆快照(jcmd) + 趋势采样(jstat —— jcmd 无流式, 趋势仍是 jstat 正解)
+jcmd "$PID" GC.heap_info > "$OUT/heap-info.txt" 2>&1 || true
 jstat -gcutil "$PID" > "$OUT/jstat-gcutil.txt" 2>&1 || true
 jstat -gc "$PID" > "$OUT/jstat-gc.txt" 2>&1 || true
 jstat -gcmetaspace "$PID" > "$OUT/jstat-gcmetaspace.txt" 2>&1 || true
 
 # 4. 堆对象直方图: 活体分析谁占大头(byte[]? HashMap? 自定义类?)
-jmap -histo "$PID" 2>/dev/null | head -50 > "$OUT/jmap-histo-top50.txt" || \
-  jcmd "$PID" GC.class_histogram 2>/dev/null | head -50 > "$OUT/jmap-histo-top50.txt" || true
+#    JDK 9+: GC.class_histogram 为正统; JDK 8 用 jmap -histo 兜底
+jcmd "$PID" GC.class_histogram 2>/dev/null | head -50 > "$OUT/class-histogram-top50.txt" \
+  || jmap -histo "$PID" 2>/dev/null | head -50 > "$OUT/class-histogram-top50.txt" || true
 
 # 5. 句柄与连接: 句柄泄漏(场景11)与连接异常的证据
 lsof -p "$PID" 2>/dev/null | wc -l > "$OUT/lsof-count.txt" || true
@@ -59,7 +68,7 @@ jcmd "$PID" VM.flags > "$OUT/vm-flags.txt" 2>&1 || true
 jcmd "$PID" VM.uptime > "$OUT/vm-uptime.txt" 2>&1 || true
 
 echo "==> 完成. 分析建议:"
-echo "    CPU 高   → threads-by-cpu.txt 找线程号, 在 jstack-*.txt 里搜对应 nid"
-echo "    内存     → jstat-gcutil.txt 看占比, jmap-histo-top50.txt 看对象大头"
-echo "    死锁     → grep -A 10 'deadlock' jstack-1.txt"
+echo "    CPU 高   → threads-by-cpu-threadprint.txt 找线程号, 在 thread-print-*.txt 里搜对应 nid"
+echo "    内存     → heap-info.txt 看分区快照, jstat-gcutil.txt 看趋势, class-histogram-top50.txt 看对象大头"
+echo "    死锁     → grep -A 10 'deadlock' thread-print-1.txt"
 echo "    句柄     → lsof-count.txt 与 lsof-by-file-top30.txt"
