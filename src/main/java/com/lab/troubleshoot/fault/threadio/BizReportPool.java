@@ -43,7 +43,9 @@ public class BizReportPool {
         AtomicInteger seq = new AtomicInteger();
         executor = new ThreadPoolExecutor(
                 CORE, MAX, 0L, TimeUnit.MILLISECONDS,
-                new LinkedBlockingQueue<>(500),                       // 无界队列陷阱：堆积不拒绝、只排队
+                new LinkedBlockingQueue<>(500),                    // 「伪无界」队列陷阱: 堆积不拒绝、只排队——
+                //   容量 500 在本演练(30个垃圾任务)中不可能触达, 等价线上 new LinkedBlockingQueue() 无界写法;
+                //   后果是任务无限堆积、接口 hang 而非快速报错(教学点: 队列有界性要显式设计)
                 r -> new Thread(r, "biz-report-worker-" + seq.incrementAndGet()));
         log.info("[BizReportPool] 线程池已(重)建: core={}, max={}, queue=LinkedBlockingQueue(500)", CORE, MAX);
     }

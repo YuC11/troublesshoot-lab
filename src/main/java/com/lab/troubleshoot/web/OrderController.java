@@ -5,7 +5,10 @@ import com.lab.troubleshoot.repository.LabRepository;
 import com.lab.troubleshoot.repository.SqlCounter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.EmptyResultDataAccessException;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -44,7 +47,13 @@ public class OrderController {
     @GetMapping("/api/order/{id}")
     public Map<String, Object> byId(@PathVariable long id) {
         long start = System.currentTimeMillis();
-        Map<String, Object> order = labRepository.findByPk(id);
+        Map<String, Object> order;
+        try {
+            order = labRepository.findByPk(id);
+        } catch (EmptyResultDataAccessException e) {
+            // 查无此单是正常业务分支而非服务器错误——404 与 500 的区分是线上 API 的基本修养
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在: " + id);
+        }
         Map<String, Object> resp = new HashMap<>(order);
         resp.put("costMs", System.currentTimeMillis() - start);
         return resp;

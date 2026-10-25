@@ -34,6 +34,7 @@ public class ConnectionPoolExhaustedScenario extends AbstractFaultScenario {
     private final LabRepository labRepository;
 
     private volatile boolean running;
+    private volatile ExecutorService pool;
     private final AtomicInteger holders = new AtomicInteger();
 
     @Override
@@ -70,13 +71,14 @@ public class ConnectionPoolExhaustedScenario extends AbstractFaultScenario {
         double holdSeconds = intParam(params, "holdSeconds", 3);
         running = true;
 
-        ExecutorService pool = Executors.newFixedThreadPool(holderCount, r -> {
+        ExecutorService current = Executors.newFixedThreadPool(holderCount, r -> {
             Thread t = new Thread(r, "conn-holder");
             t.setDaemon(true);
             return t;
         });
+        pool = current;
         for (int i = 0; i < holderCount; i++) {
-            pool.submit(() -> {
+            current.submit(() -> {
                 holders.incrementAndGet();
                 try {
                     while (running) {
@@ -102,7 +104,10 @@ public class ConnectionPoolExhaustedScenario extends AbstractFaultScenario {
     @Override
     public void doStop() {
         running = false;
-        log.info("[slow-db-pool-exhausted] 占坑线程退出中, 连接将归还池 —— /api/order/1 应在 1s 内恢复");
+        if (pool != null) {
+            pool.shutdown(); // 在途的 SELECT SLEEP(≤3s)返回后线程退出, 连接随之归还——不 interrupt 正在执行的 JDBC
+        }
+        log.info("[slow-db-pool-exhausted] 停止占坑(在途查询最长 3s 收尾), 连接归还后 /api/order/1 恢复");
     }
 
     @Override

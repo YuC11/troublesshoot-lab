@@ -134,7 +134,7 @@ public class DeadlockScenario extends AbstractFaultScenario {
                 "deadlocked", deadlocked,
                 "t1HoldsA_waitsB", t1HoldingA.get(),
                 "t2HoldsB_waitsA", t2HoldingB.get(),
-                "verifyCommand", "jstack " + pid() + " | tail -30"
+                "verifyCommand", "jcmd " + pid() + " Thread.print | tail -30"
         );
     }
 }

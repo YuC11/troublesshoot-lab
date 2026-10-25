@@ -99,8 +99,15 @@ public class SlowSqlIndexFailureScenario extends AbstractFaultScenario {
                     Thread.currentThread().interrupt();
                     break;
                 } catch (Exception e) {
-                    log.error("[slow-sql] 后台慢查询异常(不影响教学): {}", e.getMessage());
-                    break;
+                    // 瞬时异常(如连接池被场景 16 占满)不该让后台流量静默消失——
+                    // 场景仍是 RUNNING, 流量断了演练者会误判; 退避后继续
+                    log.warn("[slow-sql] 后台慢查询暂时失败, 1s 后重试: {}", e.getMessage());
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
                 }
             }
         }, "slow-sql-worker");

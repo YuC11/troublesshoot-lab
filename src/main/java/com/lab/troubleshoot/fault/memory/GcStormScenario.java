@@ -108,8 +108,14 @@ public class GcStormScenario extends AbstractFaultScenario {
         oldGenFiller.clear();
         long beforeMb = ManagementFactory.getMemoryMXBean().getHeapMemoryUsage().getUsed() >> 20;
         System.gc();
-        log.info("[gc-storm] 已清空 {} MB 填料并触发 Full GC: 堆 {} MB → 回落, "
-                + "FGC 不再增长, CPU 回落", fillerMb, beforeMb);
+        try {
+            Thread.sleep(500); // 给 GC 一点时间, 让日志里的前后对比拿到真实数字
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        long afterMb = ManagementFactory.getMemoryMXBean().getHeapMemoryUsage().getUsed() >> 20;
+        log.info("[gc-storm] 已清空 {} MB 填料并触发 Full GC: 堆 {} MB → {} MB —— FGC 不再增长, CPU 回落",
+                fillerMb, beforeMb, afterMb);
     }
 
     @Override

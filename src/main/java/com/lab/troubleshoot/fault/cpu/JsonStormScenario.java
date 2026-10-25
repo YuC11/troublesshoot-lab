@@ -2,7 +2,6 @@ package com.lab.troubleshoot.fault.cpu;
 
 import com.lab.troubleshoot.core.AbstractFaultScenario;
 import com.lab.troubleshoot.core.FaultCategory;
-import com.lab.troubleshoot.core.FaultState;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import lombok.extern.slf4j.Slf4j;
@@ -37,6 +36,7 @@ public class JsonStormScenario extends AbstractFaultScenario {
     };
 
     private volatile boolean running;
+    private volatile ExecutorService pool;
     private final AtomicLong ops = new AtomicLong();
 
     @Override
@@ -77,11 +77,12 @@ public class JsonStormScenario extends AbstractFaultScenario {
         int payloadMb = estimateJsonMb(payload);
         log.info("[cpu-json-storm] payload 就绪: {} 条实体, 序列化后约 {} MB", entities, payloadMb);
 
-        ExecutorService pool = Executors.newFixedThreadPool(workers, r -> {
+        ExecutorService current = Executors.newFixedThreadPool(workers, r -> {
             Thread t = new Thread(r, "json-burner");
             t.setDaemon(true);
             return t;
         });
+        pool = current;
         for (int i = 0; i < workers; i++) {
             pool.submit(() -> {
                 while (running) {
@@ -108,15 +109,34 @@ public class JsonStormScenario extends AbstractFaultScenario {
     @Override
     public void doStop() {
         running = false;
-        log.info("[cpu-json-storm] 风暴停止, 共完成 {} 轮序列化+反序列化", ops.get());
+        if (pool != null) {
+            pool.shutdownNow();
+            // 必须等 worker 真正退出再 GC: 最后一轮的 json 字符串+反序列化对象图(~15MB/线程)
+            // 还在临终线程栈帧里, 不等就 GC 收不掉, 停止后堆反而滞留高位(实测教训)
+            try {
+                if (!pool.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                    log.warn("[cpu-json-storm] worker 5s 未退出, 放弃等待(daemon 线程不影响进程)");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        // payload 与 worker 局部变量均已不可达, 但停止后应用零分配不会自发 GC
+        // —— 同「阅读须知」② 的 GC 惰性, 显式触发让仪表盘堆立即回落
+        System.gc();
+        try {
+            Thread.sleep(300); // 给 GC 一点时间, 仪表盘下一轮轮询即可见回落
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        log.info("[cpu-json-storm] 风暴停止(线程已退出并触发 GC), 共完成 {} 轮序列化+反序列化", ops.get());
     }
 
     @Override
     public Map<String, Object> buildStatus() {
         return Map.of(
                 "running", running,
-                "serializeOps", ops.get(),
-                "state", FaultState.RUNNING.getLabel()
+                "serializeOps", ops.get()
         );
     }
 
