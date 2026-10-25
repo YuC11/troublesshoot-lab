@@ -6,18 +6,29 @@
 #   ./scripts/lab.sh                启动(后台运行+健康检查, PID 记录到 logs/app.pid)
 #   ./scripts/lab.sh -stop          停止(SIGTERM 优雅关闭, 超时 SIGKILL; 未运行时友好提示)
 #   ./scripts/lab.sh -restart       重启(未运行则直接启动; 与 -clean 组合=完全重置)
+#   ./scripts/lab.sh -status        状态一览(PID/端口/JVM/数据行数)
 #   ./scripts/lab.sh -clean         清除 MySQL 演练库(要求进程已停止; 交互确认, -y 跳过)
-#   组合: -stop -clean | -restart -clean ;  通用: -y 跳过确认 | -h 帮助
+#   ./scripts/lab.sh -clean-all     清库+演练产物(dumps/diagnostics/旧日志)
+#   组合: -stop -clean | -restart -clean | -restart -clean-all(工厂重置)
+#   选项: -wait 启动后等待数据灌数完成 | -y 跳过确认 | -h 帮助
+#   环境变量:
+#     PORT=9090                      覆盖端口(需与 application.yml 一致)
+#     JAVA_OPTS_EXTRA='-Xmx512m'     追加/覆盖 JVM 参数(如临时加大堆复现不同故障强度)
+#     MYSQL_HOST/PORT/USER/PASSWORD  覆盖数据库凭据
 #
 # 健壮性设计(为什么这么做):
 #   * 停止前校验 PID 身份(命令行含 troubleshoot-lab) —— 防 PID 复用后误杀无关进程
 #   * PID 文件陈旧(进程已死/已被复用)时自动回退 jps/ps 发现, 不盲信文件
-#   * -clean 在应用运行时拒绝执行 —— 运行中删库等于制造真事故; 必须先 -stop 或用组合
+#   * -clean/-clean-all 在应用运行时拒绝执行 —— 运行中删库等于制造真事故
 #   * 启动幂等: 已运行则报告 PID 后退出; restart 天然幂等(未运行就直接启动)
+#   * 启动用 mkdir 锁防并发双开(陈旧锁 5 分钟自动失效); 任意退出路径自动清锁
 #   * 启动前检查 java(需 ≥21)/端口占用; 启动后健康检查 + 灌数进度提示
 #   * stop 失败(进程杀不掉)返回非零, 组合命令据此中断, 不会带病清库/重启
-#   * 端口支持 PORT 环境变量覆盖(需与 application.yml 的 server.port 一致)
 #   * app.log 超过 20MB 自动轮转为 .1, 防长期演练日志膨胀
+#
+# 已知局限(教学单机场景可接受):
+#   * kill -0 无法探测其他用户的进程 —— 多用户机器上 stop 可能误报"未运行"
+#   * macOS 无 setsid —— 终端会话异常关闭可能波及后台进程; Linux 生产无此问题
 # =============================================================================
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -26,29 +37,22 @@ JAR=target/troubleshoot-lab-1.0.0.jar
 PID_FILE=logs/app.pid
 LOG_FILE=logs/app.log
 LOG_ROTATE_BYTES=$((20 * 1024 * 1024))
+LOCK_DIR=logs/app-start.lock
 DB_NAME=troubleboot_lab
-PORT="${PORT:-8080}"   # 需与 application.yml 的 server.port 一致; 可 PORT=9090 ./scripts/lab.sh 覆盖
+PORT="${PORT:-8080}"   # 需与 application.yml 的 server.port 一致
 PING_URL="http://localhost:${PORT}/api/health/ping"
 # 凭据与环境变量覆盖规则与 application.yml 保持一致
 MYSQL_HOST="${MYSQL_HOST:-localhost}"; MYSQL_PORT="${MYSQL_PORT:-3306}"
 MYSQL_USER="${MYSQL_USER:-root}";      MYSQL_PASSWORD="${MYSQL_PASSWORD:-rootroot}"
 
-DO_STOP=0; DO_RESTART=0; DO_CLEAN=0; ASSUME_YES=0
+DO_STOP=0; DO_RESTART=0; DO_CLEAN=0; DO_CLEAN_ALL=0; DO_STATUS=0; DO_WAIT=0; ASSUME_YES=0
 
 usage() {
-  cat <<'EOF'
-用法: lab.sh [动作...] [选项]
-  (无动作)          启动服务(后台运行+健康检查)
-  -stop             停止服务
-  -restart          重启服务(未运行则直接启动)
-  -clean            清除 MySQL 演练库(需已停止, 交互确认)
-  -stop -clean      停止并清库
-  -restart -clean   完全重置: 停止+清库+重新启动
-选项:
-  -y                跳过 -clean 的交互确认
-  -h                显示本帮助
-EOF
+  sed -n '3,17p' "$0" | sed 's/^# \{0,1\}//'
 }
+
+# 任意退出路径释放启动锁(防脚本被 Ctrl-C/异常中断后留下陈旧锁)
+trap 'rm -rf "$LOCK_DIR" 2>/dev/null || true' EXIT
 
 # ── 进程发现: PID 文件(校验身份) → jps → ps ─────────────────────────────────
 find_running_pid() {
@@ -92,38 +96,102 @@ do_stop() {
   echo "==> 已停止"
 }
 
-# ── 清库: 运行中拒绝 → 确认 → 删除 → 验证 ──────────────────────────────────
+# ── 状态: PID/端口/JVM/数据 一屏 ────────────────────────────────────────────
+do_status() {
+  local pid; pid=$(find_running_pid 2>/dev/null || true)
+  if [ -z "$pid" ]; then
+    echo "状态: 未运行 (可用 ./scripts/lab.sh 启动)"
+    return 0
+  fi
+  echo "状态: 运行中 (pid=$pid)"
+  local ping_ms; ping_ms=$(curl -sf -o /dev/null -w '%{time_total}' -m 3 "$PING_URL" 2>/dev/null || true)
+  if [ -n "$ping_ms" ]; then
+    echo "    端口 ${PORT}: 就绪 (${ping_ms}s)"
+  else
+    echo "    端口 ${PORT}: 未响应(可能仍在启动/灌数)"
+  fi
+  local metrics; metrics=$(curl -sf -m 3 "http://localhost:${PORT}/api/metrics" 2>/dev/null || true)
+  if [ -n "$metrics" ] && command -v python3 >/dev/null 2>&1; then
+    echo "$metrics" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+up = d['uptimeSeconds']
+print(f\"    JVM: uptime {up//60}m{up%60}s | 堆 {d['heapUsedMb']}/{d['heapMaxMb']}MB \"
+      f\"| Metaspace {d.get('metaspaceUsedMb','?')}MB | 线程 {d['threadCount']} | 已加载类 {d['loadedClassCount']:,}\")" \
+      || echo "    JVM 指标: 解析失败(原始: $metrics)"
+  fi
+  if command -v mysql >/dev/null 2>&1; then
+    export MYSQL_PWD="$MYSQL_PASSWORD"
+    local rows; rows=$(mysql --connect-timeout=3 -h "$MYSQL_HOST" -P "$MYSQL_PORT" -u "$MYSQL_USER" -N \
+        -e "SELECT CONCAT('orders=', COUNT(*)) FROM ${DB_NAME}.orders;
+            SELECT CONCAT('order_item=', COUNT(*)) FROM ${DB_NAME}.order_item;" 2>/dev/null \
+        | tr '\n' ' ' | tr -s ' ')
+    if [ -n "$rows" ]; then
+      local o; o=$(echo "$rows" | grep -o 'orders=[0-9]*' | cut -d= -f2 || echo 0)
+      local note=""; [ "${o:-0}" -gt 0 ] && [ "${o:-0}" -lt 1000000 ] 2>/dev/null && note=" (灌数进行中...)"
+      echo "    数据: ${rows}${note}"
+    else
+      echo "    数据: 不可用(库未创建或凭据不符)"
+    fi
+  fi
+}
+
+# ── 清理: 运行中拒绝 → 确认 → 删库(+产物) → 验证 ────────────────────────────
 do_clean() {
   local pid; pid=$(find_running_pid 2>/dev/null || true)
   if [ -n "$pid" ]; then
-    echo "!! 拒绝清库: 应用正在运行(pid=$pid), 运行中删库会制造真事故"
-    echo "   先停止: ./scripts/lab.sh -stop    或组合: ./scripts/lab.sh -restart -clean"
+    echo "!! 拒绝清理: 应用正在运行(pid=$pid), 运行中删库等于制造真事故"
+    echo "   先停止: ./scripts/lab.sh -stop    或组合: ./scripts/lab.sh -restart -clean-all"
     return 1
   fi
-  if ! command -v mysql >/dev/null 2>&1; then
-    echo "!! 未找到 mysql 客户端, 无法自动清库(可手动执行: DROP DATABASE ${DB_NAME};)"; return 1
-  fi
-  echo "目标: 删除 MySQL ${MYSQL_HOST}:${MYSQL_PORT} 上的数据库 [${DB_NAME}] (账号 ${MYSQL_USER})"
+  local scope="MySQL 演练库 [${DB_NAME}]"
+  [ "$DO_CLEAN_ALL" = 1 ] && scope="${scope} + 演练产物(dumps/ diagnostics/ 旧日志)"
+  echo "目标: ${MYSQL_HOST}:${MYSQL_PORT} 上的 ${scope} (账号 ${MYSQL_USER})"
   if [ "$ASSUME_YES" != 1 ]; then
     local c; read -r -p "确认删除? 该操作不可恢复 (y/N): " c || c=""
     case "$c" in y|Y) ;; *) echo "已取消, 未做任何修改"; return 0 ;; esac
   fi
-  export MYSQL_PWD="$MYSQL_PASSWORD"   # 用环境变量传密码, 避免命令行明文告警
-  if ! mysql --connect-timeout=5 -h "$MYSQL_HOST" -P "$MYSQL_PORT" -u "$MYSQL_USER" \
-       -e "DROP DATABASE IF EXISTS ${DB_NAME};" 2>/dev/null; then
-    echo "!! 连接/删除失败: 检查 MySQL 是否启动、凭据是否正确(可用 MYSQL_HOST/MYSQL_PORT/MYSQL_USER/MYSQL_PASSWORD 覆盖)"; return 1
+  # ① MySQL 演练库
+  if command -v mysql >/dev/null 2>&1; then
+    export MYSQL_PWD="$MYSQL_PASSWORD"   # 用环境变量传密码, 避免命令行明文告警
+    if ! mysql --connect-timeout=5 -h "$MYSQL_HOST" -P "$MYSQL_PORT" -u "$MYSQL_USER" \
+         -e "DROP DATABASE IF EXISTS ${DB_NAME};" 2>/dev/null; then
+      echo "!! 连接/删除失败: 检查 MySQL 是否启动、凭据是否正确(MYSQL_HOST/MYSQL_PORT/MYSQL_USER/MYSQL_PASSWORD 覆盖)"; return 1
+    fi
+    local left; left=$(mysql --connect-timeout=5 -h "$MYSQL_HOST" -P "$MYSQL_PORT" -u "$MYSQL_USER" \
+        -N -e "SHOW DATABASES LIKE '${DB_NAME}';" 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$left" != "0" ]; then echo "!! 验证失败: 库仍存在"; return 1; fi
+    echo "==> 库 ${DB_NAME} 已删除"
+  else
+    echo "!! 未找到 mysql 客户端, 跳过删库(可手动执行: DROP DATABASE ${DB_NAME};)"
   fi
-  local left; left=$(mysql --connect-timeout=5 -h "$MYSQL_HOST" -P "$MYSQL_PORT" -u "$MYSQL_USER" \
-      -N -e "SHOW DATABASES LIKE '${DB_NAME}';" 2>/dev/null | wc -l | tr -d ' ')
-  if [ "$left" != "0" ]; then echo "!! 验证失败: 库仍存在"; return 1; fi
-  echo "==> ${DB_NAME} 已删除。下次启动会自动重建并重灌数据。"
+  # ② 演练产物(-clean-all): 堆 dump(单个40MB+)/现场快照/轮转日志, 均为可重建的演练废弃物
+  if [ "$DO_CLEAN_ALL" = 1 ]; then
+    rm -rf dumps diagnostics
+    rm -f logs/app.log.1
+    echo "==> 演练产物已清除(dumps/ diagnostics/ 旧日志)"
+  fi
+  echo "==> 清理完成。下次启动会自动重建库并重灌数据。"
 }
 
-# ── 启动: 幂等 → 前置检查 → 构建 → 后台拉起 → 健康检查 ─────────────────────
+# ── 启动: 并发锁 → 幂等 → 前置检查 → 构建 → 后台拉起 → 健康检查 ─────────────
 do_start() {
+  # 并发锁: 两个终端同时 start 会竞态双开; mkdir 原子性天然当锁,
+  # 陈旧锁(>5min, 如上次脚本被 kill -9)自动失效; 脚本任意退出由 EXIT trap 清锁
+  if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    if [ -z "$(find "$LOCK_DIR" -maxdepth 0 -mmin +5 2>/dev/null)" ]; then
+      echo "!! 另一个启动/重启正在进行(锁: $LOCK_DIR); 若确认无启动在跑可删除该目录后重试"; return 1
+    fi
+    echo "==> 发现陈旧启动锁(>5min), 自动清除"
+    rm -rf "$LOCK_DIR"
+    mkdir "$LOCK_DIR"
+  fi
+
   local pid; pid=$(find_running_pid 2>/dev/null || true)
   if [ -n "$pid" ]; then
-    echo "==> 已在运行 (pid=$pid): http://localhost:${PORT}  —— 如需重启请用 -restart"; return 0
+    echo "==> 已在运行 (pid=$pid): http://localhost:${PORT}  —— 如需重启请用 -restart"
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+    return 0
   fi
 
   # 前置检查: java 版本(编译目标是 21, 低版本 JDK 无法加载 61.0 字节码)
@@ -161,12 +229,14 @@ do_start() {
 
   # 教学 JVM 参数(每个参数都是 docs 里的教学点):
   #   小堆 256m 快速复现内存故障 / 512k 栈 / Metaspace 上限 64m(场景02) /
-  #   OOM 自动落 dump 到 dumps/
+  #   OOM 自动落 dump 到 dumps/ ; JAVA_OPTS_EXTRA 可追加覆盖(如 -Xmx512m)
   local java_opts="-Xms256m -Xmx256m -Xss512k -XX:MaxMetaspaceSize=64m \
- -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=./dumps -Dfile.encoding=UTF-8"
+ -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=./dumps -Dfile.encoding=UTF-8 \
+ ${JAVA_OPTS_EXTRA:-}"
 
   nohup "$java_bin" $java_opts -jar "$JAR" > "$LOG_FILE" 2>&1 &
   echo $! > "$PID_FILE"
+  rmdir "$LOCK_DIR" 2>/dev/null || true   # PID 文件已落盘, 锁的使命结束
   local new_pid; new_pid=$(cat "$PID_FILE")
   echo "==> 已后台启动 (pid=$new_pid), 健康检查中(最长 120s)..."
 
@@ -182,9 +252,28 @@ do_start() {
     echo "!! 120s 未就绪(可能卡在构建/灌数), 最近日志:"; tail -15 "$LOG_FILE"
     echo "   进程保留(pid=$new_pid)以便排查, 详情: tail -f $LOG_FILE"; return 1
   fi
-  echo "==> 就绪: http://localhost:${PORT} (pid=$new_pid)"
-  if grep -q "开始灌入" "$LOG_FILE" 2>/dev/null && ! grep -q "初始化完成" "$LOG_FILE" 2>/dev/null; then
-    echo "==> 首次灌数进行中(约 2~4 分钟, 期间 DB 接口暂不可用), 跟踪: tail -f $LOG_FILE"
+  echo "==> 服务就绪: http://localhost:${PORT} (pid=$new_pid)"
+
+  # 数据就绪: 默认只提示; -wait 则阻塞到灌数完成(脚本化/CI 场景需要确定性)
+  if grep -q "初始化完成" "$LOG_FILE" 2>/dev/null; then
+    echo "==> 数据已就绪"
+  elif grep -q "开始灌入" "$LOG_FILE" 2>/dev/null; then
+    echo "==> 首次灌数进行中(约 2~4 分钟), 跟踪: tail -f $LOG_FILE"
+    if [ "$DO_WAIT" = 1 ]; then
+      echo "==> [-wait] 等待数据就绪(最长 10 分钟)..."
+      local w; local ok=0
+      for w in $(seq 1 120); do
+        if grep -q "初始化完成" "$LOG_FILE" 2>/dev/null; then ok=1; break; fi
+        if ! kill -0 "$new_pid" 2>/dev/null; then
+          echo "!! 等待期间进程退出, 日志尾部:"; tail -10 "$LOG_FILE"; return 1
+        fi
+        sleep 5
+      done
+      if [ "$ok" != 1 ]; then
+        echo "!! 10 分钟未完成灌数, 详情: tail -f $LOG_FILE"; return 1
+      fi
+      echo "==> 数据就绪"
+    fi
   fi
 }
 
@@ -194,11 +283,14 @@ while [ $# -gt 0 ]; do
     -stop) DO_STOP=1 ;;
     -restart) DO_RESTART=1 ;;
     -clean) DO_CLEAN=1 ;;
+    -clean-all) DO_CLEAN=1; DO_CLEAN_ALL=1 ;;
+    -status) DO_STATUS=1 ;;
+    -wait) DO_WAIT=1 ;;
     -y|--yes) ASSUME_YES=1 ;;
     -h|--help) usage; exit 0 ;;
     *)
       echo "lab.sh: 未知参数 '$1'" >&2
-      echo "用法: lab.sh [-stop] [-restart] [-clean] [-y] [-h]  —— 详情: ./scripts/lab.sh -h" >&2
+      echo "用法: lab.sh [-stop] [-restart] [-status] [-clean] [-clean-all] [-wait] [-y] [-h]" >&2
       exit 1 ;;
   esac
   shift
@@ -206,8 +298,14 @@ done
 
 mkdir -p logs dumps diagnostics
 
-# 执行语义: stop/restart 都先停; clean 紧随其后; restart 最后再启动
-# (-restart -clean = 完全重置: 停止→清库→启动)。
+# 状态查询是独立动作(不与启停组合): 输出一屏后结束
+if [ "$DO_STATUS" = 1 ]; then
+  do_status
+  exit 0
+fi
+
+# 执行语义: stop/restart 都先停; clean(-all) 紧随其后; restart 最后再启动
+# (-restart -clean-all = 工厂重置: 停止→清库清产物→启动)。
 # 前面任一步失败(非零)时 set -e 中断, 不会带病执行后续步骤。
 if [ "$DO_STOP" = 1 ] || [ "$DO_RESTART" = 1 ]; then
   do_stop
