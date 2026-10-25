@@ -16,8 +16,9 @@
 # 0) 环境自检（需 JDK21+ / Maven / 本机 MySQL 8）
 java -version && mvn -version && mysql -h127.0.0.1 -uroot -prootroot -e "SELECT VERSION();"
 
-# 1) 启动（自动打包 + 教学JVM参数 + 首次自动建库灌数: orders 100万×29列 + order_item 300万, 约 2~4 分钟）
-./scripts/start.sh
+# 1) 启动（统一入口 lab.sh: 自动打包+教学JVM参数+后台运行+健康检查;
+#    首次自动建库灌数: orders 100万×29列 + order_item 300万, 约 2~4 分钟）
+./scripts/lab.sh
 
 # 2) 打开控制台触发故障, 另开终端按手册排查
 open http://localhost:8080
@@ -64,7 +65,7 @@ open http://localhost:8080
 ## 项目结构
 
 ```
-scripts/  start.sh(教学JVM参数) diagnose.sh(一键现场快照) mysql-clean.sh(清除) arthas.sh(本地4.0.4)
+scripts/  lab.sh(统一管理: 启动/-stop/-clean) diagnose.sh(一键现场快照) arthas.sh(本地4.0.4)
 docs/     01方法论 02内存 03CPU 04线程IO 05接口慢 06速查表（6 份整合手册）
 src/      core/设计模式骨架  web/门面与业务接口  fault/{memory,cpu,threadio,slowapi}/16场景
 docker/   docker-compose.yml（备用 MySQL，demo 默认不用）
@@ -74,14 +75,18 @@ dumps/ diagnostics/ logs/   演练产物（已 gitignore）
 ## 常用命令备忘
 
 ```bash
-./scripts/start.sh                                  # 启动
+./scripts/lab.sh                                    # 统一管理入口: 启动(后台+健康检查)
+./scripts/lab.sh -stop                              # 优雅停止(未运行时友好提示, PID身份校验防误杀)
+./scripts/lab.sh -clean                             # 清除MySQL演练库(需先停止, 交互确认, -y 跳过)
+./scripts/lab.sh -stop -clean                       # 组合: 停止并清库
 ./scripts/diagnose.sh                               # 一键快照现场到 diagnostics/
 ./scripts/arthas.sh                                 # Arthas attach（交互）
-./scripts/mysql-clean.sh                            # 删除并重置演练库
 curl localhost:8080/api/faults                      # 场景列表
 curl -X POST localhost:8080/api/faults/oom-heap/trigger?mode=crash   # 例: 真OOM+dump
 curl -X POST localhost:8080/api/faults/<id>/stop    # 停止任意场景
 ```
+
+> PID 记录在 `logs/app.pid`，日志在 `logs/app.log`。
 
 ## 已知说明
 

@@ -16,7 +16,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *
  * <p>【病灶原型】动态代理/字节码增强（CGLib、Groovy 脚本、反射框架）不断生成新类，
  * 或热部署场景下旧 ClassLoader 卸不干净。Metaspace（JDK8+ 替代 PermGen）存放类元数据，
- * 由 -XX:MaxMetaspaceSize=64m 限制（start.sh 已配置）。</p>
+ * 由 -XX:MaxMetaspaceSize=64m 限制（scripts/lab.sh 启动参数已配置）。</p>
  *
  * <p>【实现手法】把 {@link MetaspaceMarker} 的 .class 字节码读出一份，循环用
  * <b>新的 ClassLoader</b> 反复 defineClass——同一个类名在不同加载器里是 16 个、
@@ -124,7 +124,7 @@ public class MetaspaceOomScenario extends AbstractFaultScenario {
                 "leakedLoaders", loaders.size(),
                 "loadedClassTotal", ManagementFactory.getClassLoadingMXBean().getLoadedClassCount(),
                 "metaspaceUsedMb", metaspaceUsedMb(),
-                "metaspaceMaxMb", 64, // 与 start.sh 的 -XX:MaxMetaspaceSize 保持一致
+                "metaspaceMaxMb", 64, // 与 scripts/lab.sh 的 -XX:MaxMetaspaceSize 保持一致
                 "oomOccurred", oomOccurred
         );
     }

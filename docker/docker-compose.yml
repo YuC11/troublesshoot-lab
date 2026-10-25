@@ -4,7 +4,7 @@
 # 演练场默认连接本机已安装的 MySQL(见 application.yml: localhost:3306)。
 # 仅当你的机器没有 MySQL 时, 才用本文件临时起一个:
 #     cd docker && docker compose up -d
-#     # 账号密码与 application.yml 缺省值一致(root/rootroot), 起完直接 ./scripts/start.sh
+#     # 账号密码与 application.yml 缺省值一致(root/rootroot), 起完直接 ./scripts/lab.sh
 #     # 用完销毁(连同数据): docker compose down -v
 #
 # 为什么留这个文件: 环境可复现是教学项目的基本修养——换一台机器也能 3 分钟起全套。
