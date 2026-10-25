@@ -65,7 +65,7 @@ open http://localhost:8080
 ## 项目结构
 
 ```
-scripts/  lab.sh(统一管理: 启动/-stop/-clean) diagnose.sh(一键现场快照) arthas.sh(本地4.0.4)
+scripts/  lab.sh(统一管理: 启动/-stop/-clean) diagnose.sh(一键现场快照) arthas.sh(本地4.0.4, 自动attach演练场)
 docs/     01方法论 02内存 03CPU 04线程IO 05接口慢 06速查表（6 份整合手册）
 src/      core/设计模式骨架  web/门面与业务接口  fault/{memory,cpu,threadio,slowapi}/16场景
 docker/   docker-compose.yml（备用 MySQL，demo 默认不用）
@@ -86,7 +86,7 @@ dumps/ diagnostics/ logs/   演练产物（已 gitignore）
 ./scripts/lab.sh -restart -wait                     # 重启并阻塞等待数据灌数完成(脚本化/CI)
 JAVA_OPTS_EXTRA='-Xmx512m' ./scripts/lab.sh         # 临时加大堆复现不同故障强度
 ./scripts/diagnose.sh                               # 一键快照现场到 diagnostics/
-./scripts/arthas.sh                                 # Arthas attach（交互）
+./scripts/arthas.sh                                 # Arthas attach（自动选中演练场进程）
 curl localhost:8080/api/faults                      # 场景列表
 curl -X POST localhost:8080/api/faults/oom-heap/trigger?mode=crash   # 例: 真OOM+dump
 curl -X POST localhost:8080/api/faults/<id>/stop    # 停止任意场景
