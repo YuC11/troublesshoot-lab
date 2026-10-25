@@ -24,8 +24,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * 与堆 OOM 的排查差异：jmap -histo 看不到元数据，要看 jcmd GC.heap_info / jstat -gcmetacapacity
  * 与已加载类数（每个类的元数据都在 Metaspace，类卸载条件是「类加载器可回收」）。</p>
  *
- * <p>类卸载教学点：必须持有 loader 引用防止提前卸载；stop 后置空引用，
- * 类在下一次 GC 才可能卸载（验证：jcmd &lt;pid&gt; GC.run 后 Metaspace 回落）。</p>
+ * <p>类卸载教学点：必须持有 loader 引用防止提前卸载；doStop 释放引用并显式触发 GC
+ * 完成类卸载（引用清空 ≠ 类卸载，卸载只发生在 GC 中——同场景 01 的「GC 惰性」）。</p>
  */
 @Slf4j
 @Component
@@ -112,10 +112,23 @@ public class MetaspaceOomScenario extends AbstractFaultScenario {
         if (worker != null) {
             worker.interrupt();
         }
-        // 置空强引用 → 加载器可回收 → 类可卸载。验证: jcmd <pid> GC.run 后再看 Metaspace
+        // 与场景 01 同理: 引用清空 ≠ 类卸载 —— 类卸载只发生在 GC 中(前提: 加载器不可达),
+        // 而停止后应用几乎零分配, 不主动 GC 的话仪表盘的 Metaspace/已加载类会长期停在高位。
+        // 显式 System.gc() 触发 Full GC → 卸载死加载器的类 → Metaspace 立即回落。
+        long freed = loaders.size();
+        long beforeKb = metaspaceUsedKb();
+        int classesBefore = ManagementFactory.getClassLoadingMXBean().getLoadedClassCount();
         loaders.clear();
-        log.info("[oom-metaspace] 加载器引用已释放, 类将在 GC 后卸载 —— 用 jcmd {} GC.run + jcmd GC.heap_info 验证回落",
-                pid());
+        System.gc();
+        try {
+            Thread.sleep(500); // 给类卸载一点时间, 让日志里的前后对比拿到真实数字
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        long afterKb = metaspaceUsedKb();
+        int classesAfter = ManagementFactory.getClassLoadingMXBean().getLoadedClassCount();
+        log.info("[oom-metaspace] 已释放 {} 个加载器并触发 Full GC(类卸载): Metaspace {} KB → {} KB, "
+                + "已加载类 {} → {} —— 仪表盘应立即回落", freed, beforeKb, afterKb, classesBefore, classesAfter);
     }
 
     @Override
@@ -130,11 +143,16 @@ public class MetaspaceOomScenario extends AbstractFaultScenario {
     }
 
     private int metaspaceUsedMb() {
+        return (int) (metaspaceUsedKb() >> 10);
+    }
+
+    /** KB 精度：温和模式涨幅仅 ~2MB, MB 取整看不出差异, 前后对比日志用 KB 才有意义 */
+    private long metaspaceUsedKb() {
         return ManagementFactory.getMemoryPoolMXBeans().stream()
                 .filter(p -> p.getName().toLowerCase().contains("metaspace"))
                 .findFirst()
-                .map(p -> (int) (p.getUsage().getUsed() >> 20))
-                .orElse(-1);
+                .map(p -> p.getUsage().getUsed() >> 10)
+                .orElse(-1L);
     }
 
     private static byte[] readMarkerBytes() {
